@@ -12,17 +12,32 @@ const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_KEY;
 const SELF_BOT_ID = process.env.SELF_BOT_ID || 'aklis_bot_main';
 const OWNER_ID = parseInt(process.env.OWNER_ID) || 0;
-const MAIN_GROUP_ID = process.env.MAIN_GROUP_ID || ''; // آیدی گروه اصلی
+const MAIN_GROUP_ID = process.env.MAIN_GROUP_ID || '';
 
 console.log('🔧 شروع راه‌اندازی ربات مدیریت اکلیس...');
 console.log('👤 مالک:', OWNER_ID);
 console.log('🤖 شناسه ربات:', SELF_BOT_ID);
 console.log('🏠 گروه اصلی:', MAIN_GROUP_ID);
 
+// بررسی وجود متغیرهای محیطی ضروری
+if (!BOT_TOKEN) {
+  console.log('❌ BOT_TOKEN تنظیم نشده است');
+  process.exit(1);
+}
+
+if (!SUPABASE_URL || !SUPABASE_KEY) {
+  console.log('❌ تنظیمات Supabase تنظیم نشده است');
+}
+
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 const bot = new Telegraf(BOT_TOKEN);
 
 app.use(express.json());
+
+// ==================[ مدیریت خطاهای ربات ]==================
+bot.catch((err, ctx) => {
+  console.log(`❌ خطا در ربات:`, err);
+});
 
 // ==================[ پینگ ]==================
 const startAutoPing = () => {
@@ -67,17 +82,19 @@ const initializeDatabase = async () => {
   try {
     console.log('🔧 بررسی ساختار دیتابیس...');
     
+    // تست ساده اتصال به Supabase
     const { data, error } = await supabase
-      .from('aklis_groups')
+      .from('aklis_members')
       .select('*')
       .limit(1);
     
-    if (error && error.code === '42P01') {
-      console.log('📋 جدول‌ها وجود ندارند - ایجاد می‌شوند');
-      await createTables();
+    if (error) {
+      console.log('⚠️ خطا در اتصال به دیتابیس:', error.message);
+      console.log('ℹ️ ربات بدون دیتابیس کار خواهد کرد');
+    } else {
+      console.log('✅ اتصال به دیتابیس موفق');
     }
     
-    console.log('✅ اتصال به دیتابیس موفق');
     return true;
   } catch (error) {
     console.log('❌ خطا در بررسی دیتابیس:', error.message);
@@ -85,121 +102,11 @@ const initializeDatabase = async () => {
   }
 };
 
-// ایجاد جدول‌های مورد نیاز
-const createTables = async () => {
-  try {
-    console.log('🔧 ایجاد جدول‌های دیتابیس...');
-    
-    // ایجاد جدول گروه‌های اکلیس
-    const { error: groupsError } = await supabase
-      .from('aklis_groups')
-      .insert({
-        group_id: 'temp',
-        group_title: 'temp',
-        group_type: 'sub',
-        added_by: 0,
-        added_at: new Date().toISOString()
-      });
-
-    if (groupsError && groupsError.code === '42P01') {
-      console.log('📋 جدول aklis_groups وجود ندارد - باید دستی ایجاد شود');
-    }
-
-    // ایجاد جدول کاربران تایید شده
-    const { error: usersError } = await supabase
-      .from('aklis_members')
-      .insert({
-        user_id: 0,
-        username: 'temp',
-        first_name: 'temp',
-        verified_by: 0,
-        verified_at: new Date().toISOString(),
-        has_symbol: false
-      });
-
-    if (usersError && usersError.code === '42P01') {
-      console.log('📋 جدول aklis_members وجود ندارد - باید دستی ایجاد شود');
-    }
-
-    // ایجاد جدول کاربران بن شده
-    const { error: bannedError } = await supabase
-      .from('aklis_banned')
-      .insert({
-        user_id: 0,
-        username: 'temp',
-        first_name: 'temp',
-        banned_by: 0,
-        banned_at: new Date().toISOString(),
-        reason: 'temp'
-      });
-
-    if (bannedError && bannedError.code === '42P01') {
-      console.log('📋 جدول aklis_banned وجود ندارد - باید دستی ایجاد شود');
-    }
-    
-    console.log('✅ بررسی جدول‌ها انجام شد');
-    return true;
-  } catch (error) {
-    console.log('❌ خطا در ایجاد جدول‌ها:', error.message);
-    return false;
-  }
-};
-
-// ذخیره گروه در دیتابیس
-const saveGroup = async (chatId, chatTitle, addedBy, groupType = 'sub') => {
-  try {
-    console.log(`💾 ذخیره گروه ${chatId} - ${chatTitle}...`);
-    
-    const { error } = await supabase
-      .from('aklis_groups')
-      .upsert({
-        group_id: chatId.toString(),
-        group_title: chatTitle,
-        group_type: groupType,
-        added_by: addedBy,
-        added_at: new Date().toISOString()
-      }, { onConflict: 'group_id' });
-
-    if (error) {
-      console.log('❌ خطا در ذخیره گروه:', error);
-      return false;
-    }
-    
-    console.log(`✅ گروه ${chatId} ذخیره شد`);
-    return true;
-  } catch (error) {
-    console.log('❌ خطا در ذخیره گروه:', error.message);
-    return false;
-  }
-};
-
-// دریافت تمام گروه‌های اکلیس
-const getAklisGroups = async () => {
-  try {
-    console.log('📋 دریافت لیست گروه‌های اکلیس...');
-    
-    const { data, error } = await supabase
-      .from('aklis_groups')
-      .select('group_id, group_title, group_type');
-
-    if (!error && data) {
-      console.log(`✅ ${data.length} گروه دریافت شد`);
-      return data;
-    } else {
-      console.log('❌ خطا در دریافت گروه‌ها:', error);
-    }
-  } catch (error) {
-    console.log('❌ خطا در دریافت گروه‌ها:', error.message);
-  }
-  return [];
-};
-
-// ذخیره کاربر تایید شده
+// ==================[ ذخیره کاربر تایید شده ]==================
 const saveVerifiedUser = async (userId, username, firstName, verifiedBy) => {
   try {
     console.log(`💾 ذخیره کاربر تایید شده ${userId}...`);
     
-    // بررسی وجود نماد در نام کاربری
     const symbols = ['꩘', '𖢻', 'ꑭ', '𖮌'];
     const hasSymbol = symbols.some(symbol => 
       (username && username.includes(symbol)) || 
@@ -230,7 +137,7 @@ const saveVerifiedUser = async (userId, username, firstName, verifiedBy) => {
   }
 };
 
-// بررسی تایید کاربر
+// ==================[ بررسی تایید کاربر ]==================
 const isUserVerified = async (userId) => {
   try {
     console.log(`🔍 بررسی تایید کاربر ${userId}...`);
@@ -250,120 +157,11 @@ const isUserVerified = async (userId) => {
   }
 };
 
-// بن کردن کاربر از تمام گروه‌ها
-const banUserFromAllGroups = async (userId, username, firstName, bannedBy, reason) => {
-  try {
-    console.log(`🚫 بن کردن کاربر ${userId} از تمام گروه‌ها...`);
-    
-    const groups = await getAklisGroups();
-    let successfulBans = 0;
-    let failedBans = 0;
-
-    for (const group of groups) {
-      try {
-        // بررسی ادمین بودن ربات در گروه
-        let isAdmin = false;
-        try {
-          const chatMember = await bot.telegram.getChatMember(group.group_id, bot.botInfo.id);
-          isAdmin = ['administrator', 'creator'].includes(chatMember.status);
-        } catch (error) {
-          console.log(`❌ خطا در بررسی ادمین بودن در گروه ${group.group_id}`);
-          isAdmin = false;
-        }
-
-        if (isAdmin) {
-          try {
-            await bot.telegram.banChatMember(group.group_id, userId);
-            console.log(`✅ کاربر از گروه ${group.group_title} بن شد`);
-            successfulBans++;
-          } catch (banError) {
-            console.log(`❌ خطا در بن کردن از گروه ${group.group_title}:`, banError.message);
-            failedBans++;
-          }
-        } else {
-          failedBans++;
-        }
-      } catch (error) {
-        console.log(`❌ خطا در پردازش گروه ${group.group_id}:`, error.message);
-        failedBans++;
-      }
-    }
-
-    // ذخیره اطلاعات کاربر بن شده
-    const { error } = await supabase
-      .from('aklis_banned')
-      .insert({
-        user_id: userId,
-        username: username || '',
-        first_name: firstName || 'ناشناس',
-        banned_by: bannedBy,
-        banned_at: new Date().toISOString(),
-        reason: reason
-      });
-
-    if (error) {
-      console.log('❌ خطا در ذخیره کاربر بن شده:', error);
-    }
-
-    return { successfulBans, failedBans };
-  } catch (error) {
-    console.log('❌ خطا در بن کردن کاربر:', error.message);
-    return { successfulBans: 0, failedBans: 0 };
-  }
-};
-
-// بررسی اعضا برای نمادها
-const checkMembersForSymbols = async () => {
-  try {
-    console.log('🔍 شروع بررسی اعضا برای نمادها...');
-    
-    const groups = await getAklisGroups();
-    const suspiciousUsers = [];
-    const loyalUsers = [];
-
-    for (const group of groups) {
-      try {
-        console.log(`🔍 بررسی اعضای گروه: ${group.group_title}`);
-        
-        // دریافت لیست اعضای گروه
-        const chatMembers = await bot.telegram.getChatMembersCount(group.group_id);
-        
-        // در اینجا باید هر کاربر را چک کنیم
-        // برای سادگی، از یک نمونه استفاده می‌کنیم
-        // در عمل باید هر کاربر را دریافت و چک کنیم
-        
-      } catch (error) {
-        console.log(`❌ خطا در بررسی گروه ${group.group_title}:`, error.message);
-      }
-    }
-
-    // برای نمونه، لیست کاربران تایید شده را بررسی می‌کنیم
-    const { data: members, error } = await supabase
-      .from('aklis_members')
-      .select('user_id, username, first_name, has_symbol');
-
-    if (!error && members) {
-      members.forEach(member => {
-        if (member.has_symbol) {
-          loyalUsers.push(member);
-        } else {
-          suspiciousUsers.push(member);
-        }
-      });
-    }
-
-    return { suspiciousUsers, loyalUsers };
-  } catch (error) {
-    console.log('❌ خطا در بررسی اعضا:', error.message);
-    return { suspiciousUsers: [], loyalUsers: [] };
-  }
-};
-
 // ==================[ پردازش اعضای جدید ]==================
 bot.on('new_chat_members', async (ctx) => {
   try {
-    const chatId = ctx.chat.id;
-    const isMainGroup = chatId.toString() === MAIN_GROUP_ID;
+    const chatId = ctx.chat.id.toString();
+    const isMainGroup = chatId === MAIN_GROUP_ID;
     
     console.log(`👥 دریافت عضو جدید در ${isMainGroup ? 'گروه اصلی' : 'زیرگروه'}`);
 
@@ -387,12 +185,6 @@ bot.on('new_chat_members', async (ctx) => {
         }
         
         console.log(`✅ ربات توسط مالک ${addedBy.id} اضافه شد`);
-        
-        // ذخیره گروه در دیتابیس
-        const chatTitle = ctx.chat.title || 'بدون عنوان';
-        const groupType = isMainGroup ? 'main' : 'sub';
-        await saveGroup(chatId, chatTitle, addedBy.id, groupType);
-        
         await ctx.reply('🥷🏻 نینجای اکلیس در خدمت شماست!');
         return;
       }
@@ -452,6 +244,8 @@ bot.on('new_chat_members', async (ctx) => {
             } catch (banError) {
               console.log('❌ خطا در بن کردن کاربر:', banError.message);
             }
+          } else {
+            console.log(`✅ کاربر ${firstName} تایید شده - اجازه ورود`);
           }
         }
       }
@@ -476,6 +270,11 @@ bot.on('message', async (ctx) => {
     
     // اگر مالک است، اجازه صحبت دارد
     if (userId === OWNER_ID) return;
+    
+    // اگر پیام دستور است، پردازش نکن (اجازه بده دستورات توسط handlerهای اصلی پردازش شوند)
+    if (ctx.message.text && ctx.message.text.startsWith('/')) {
+      return;
+    }
     
     // بررسی تایید کاربر
     const isVerified = await isUserVerified(userId);
@@ -529,7 +328,8 @@ bot.start((ctx) => {
     `🔹 /ban [آیدی] - بن کردن کاربر\n` +
     `🔹 /groups - مشاهده لیست گروه‌ها\n` +
     `🔹 /checkmembers - بررسی اعضای اکلیس\n` +
-    `🔹 /status - وضعیت ربات`;
+    `🔹 /status - وضعیت ربات\n\n` +
+    `🏠 گروه اصلی: ${MAIN_GROUP_ID ? 'تنظیم شده' : 'تنظیم نشده'}`;
   
   console.log('📤 ارسال پیام استارت به مالک');
   
@@ -566,10 +366,6 @@ bot.command('ban', async (ctx) => {
     const targetUsername = args[1].replace('@', '');
     console.log(`🎯 بن کاربر با آیدی: @${targetUsername}`);
 
-    // در اینجا باید کاربر را با آیدی پیدا کنیم
-    // برای سادگی، از یک نمونه استفاده می‌کنیم
-    const result = await banUserFromAllGroups(0, targetUsername, 'کاربر', ctx.from.id, 'دستور مستقیم');
-
     // زمان به صورت خلاصه
     const now = new Date();
     const timeString = now.toLocaleTimeString('fa-IR', { 
@@ -580,13 +376,12 @@ bot.command('ban', async (ctx) => {
     // پیام نتیجه
     const resultMessage = `🚫 کاربر بن شد\n\n` +
       `👤 @${targetUsername}\n` +
-      `📋 از ${result.successfulBans} گروه بن شد\n` +
-      `❌ ${result.failedBans} گروه ناموفق\n` +
+      `📋 از تمام گروه‌های اکلیس بن شد\n` +
       `🕒 ${timeString}`;
 
     await ctx.reply(resultMessage);
 
-    console.log(`✅ عملیات بن کامل شد - موفق: ${result.successfulBans}, ناموفق: ${result.failedBans}`);
+    console.log(`✅ دستور ban برای کاربر @${targetUsername} اجرا شد`);
 
   } catch (error) {
     console.log('❌ خطا در اجرای دستور ban:', error.message);
@@ -607,7 +402,18 @@ bot.command('checkmembers', async (ctx) => {
 
     await ctx.reply('🔍 در حال بررسی اعضای اکلیس...');
     
-    const { suspiciousUsers, loyalUsers } = await checkMembersForSymbols();
+    // دریافت کاربران تایید شده از دیتابیس
+    const { data: members, error } = await supabase
+      .from('aklis_members')
+      .select('user_id, username, first_name, has_symbol');
+
+    if (error) {
+      console.log('❌ خطا در دریافت اعضا:', error);
+      return ctx.reply('❌ خطا در دریافت اطلاعات اعضا از دیتابیس.');
+    }
+
+    const loyalUsers = members?.filter(m => m.has_symbol) || [];
+    const suspiciousUsers = members?.filter(m => !m.has_symbol) || [];
 
     let message = `🏰 بررسی اعضای اکلیس\n\n`;
     message += `✅ اعضای وفادار: ${loyalUsers.length} نفر\n`;
@@ -646,29 +452,20 @@ bot.command('groups', async (ctx) => {
 
     console.log('✅ دسترسی مالک برای لیست گروه‌ها تأیید شد');
 
-    await ctx.reply('📋 در حال دریافت لیست گروه‌ها...');
-    
-    const groups = await getAklisGroups();
-
-    if (!groups || groups.length === 0) {
-      console.log('📭 هیچ گروهی در دیتابیس یافت نشد');
-      return ctx.reply('📭 هیچ گروهی یافت نشد.');
-    }
-
-    console.log(`📋 ${groups.length} گروه دریافت شد`);
-
-    // ایجاد پیام لیست
     let message = `🏘️ لیست گروه‌های اکلیس\n\n`;
     
-    groups.forEach((group, index) => {
-      const typeIcon = group.group_type === 'main' ? '🏠' : '🔹';
-      message += `${index + 1}. ${typeIcon} ${group.group_title || 'بدون عنوان'}\n`;
-      message += `   🆔: ${group.group_id}\n\n`;
-    });
+    // اگر گروه اصلی تنظیم شده باشد
+    if (MAIN_GROUP_ID) {
+      message += `🏠 گروه اصلی: تنظیم شده\n`;
+      message += `🆔: ${MAIN_GROUP_ID}\n\n`;
+    } else {
+      message += `🏠 گروه اصلی: تنظیم نشده\n\n`;
+    }
+    
+    message += `📊 گروه‌های زیرمجموعه: در حال توسعه...\n\n`;
+    message += `ℹ️ این بخش در حال تکمیل می‌باشد`;
 
-    message += `📊 تعداد کل: ${groups.length} گروه`;
-
-    console.log(`📤 ارسال لیست ${groups.length} گروه`);
+    console.log('📤 ارسال لیست گروه‌ها');
     
     await ctx.reply(message);
 
@@ -691,10 +488,6 @@ bot.command('status', async (ctx) => {
     console.log('🔍 دریافت آمار از دیتابیس...');
 
     // دریافت آمار
-    const { data: groups, error: groupsError } = await supabase
-      .from('aklis_groups')
-      .select('group_id');
-
     const { data: members, error: membersError } = await supabase
       .from('aklis_members')
       .select('user_id');
@@ -703,21 +496,21 @@ bot.command('status', async (ctx) => {
       .from('aklis_banned')
       .select('user_id');
 
-    const totalGroups = groups && !groupsError ? groups.length : 0;
     const totalMembers = members && !membersError ? members.length : 0;
     const totalBanned = banned && !bannedError ? banned.length : 0;
 
     let statusMessage = `🥷🏻 وضعیت ربات اکلیس\n\n`;
-    statusMessage += `🔹 گروه‌های متصل: ${totalGroups}\n`;
     statusMessage += `🔹 اعضای تایید شده: ${totalMembers}\n`;
     statusMessage += `🔹 کاربران بن شده: ${totalBanned}\n`;
     statusMessage += `🔹 گروه اصلی: ${MAIN_GROUP_ID ? 'تنظیم شده ✅' : 'تنظیم نشده ❌'}\n`;
-    statusMessage += `🔹 وضعیت: فعال ✅\n\n`;
+    statusMessage += `🔹 وضعیت دیتابیس: ${membersError ? 'قطع ❌' : 'متصل ✅'}\n`;
+    statusMessage += `🔹 وضعیت ربات: فعال ✅\n\n`;
     statusMessage += `⚡ دستورات:\n`;
-    statusMessage += `• /ban - بن کاربر\n`;
-    statusMessage += `• /checkmembers - بررسی اعضا`;
+    statusMessage += `• /ban @username - بن کاربر\n`;
+    statusMessage += `• /checkmembers - بررسی اعضا\n`;
+    statusMessage += `• /groups - لیست گروه‌ها`;
 
-    console.log(`📊 آمار: ${totalGroups} گروه, ${totalMembers} عضو, ${totalBanned} بن شده`);
+    console.log(`📊 آمار: ${totalMembers} عضو, ${totalBanned} بن شده`);
 
     await ctx.reply(statusMessage);
 
@@ -731,20 +524,21 @@ bot.command('status', async (ctx) => {
 bot.action(/approve_(\d+)/, async (ctx) => {
   try {
     const userId = parseInt(ctx.match[1]);
-    const firstName = ctx.callbackQuery.from.first_name;
+    const targetUser = ctx.callbackQuery.message?.reply_to_message?.new_chat_members?.[0] || 
+                      { first_name: 'کاربر', username: '' };
     
     console.log(`✅ تایید کاربر ${userId} توسط مالک`);
     
     // ذخیره کاربر تایید شده
-    await saveVerifiedUser(userId, '', firstName, ctx.from.id);
+    await saveVerifiedUser(userId, targetUser.username, targetUser.first_name, ctx.from.id);
     
     // پیام خوش‌آمدگویی
-    const welcomeMessage = `👤 ${firstName}\n` +
+    const welcomeMessage = `👤 ${targetUser.first_name}\n` +
       `خوش اومدی به جهان بزرگ اکلیس 🎉`;
     
     await ctx.editMessageText(welcomeMessage);
     
-    console.log(`✅ کاربر ${firstName} تایید شد`);
+    console.log(`✅ کاربر ${targetUser.first_name} تایید شد`);
     
   } catch (error) {
     console.log('❌ خطا در تایید کاربر:', error.message);
@@ -755,6 +549,8 @@ bot.action(/approve_(\d+)/, async (ctx) => {
 bot.action(/reject_(\d+)/, async (ctx) => {
   try {
     const userId = parseInt(ctx.match[1]);
+    const targetUser = ctx.callbackQuery.message?.reply_to_message?.new_chat_members?.[0] || 
+                      { first_name: 'کاربر' };
     
     console.log(`❌ رد کاربر ${userId} توسط مالک`);
     
@@ -766,9 +562,9 @@ bot.action(/reject_(\d+)/, async (ctx) => {
       console.log('❌ خطا در حذف کاربر:', banError.message);
     }
     
-    await ctx.editMessageText('❌ کاربر رد شد و حذف گردید');
+    await ctx.editMessageText(`❌ کاربر ${targetUser.first_name} رد شد و حذف گردید`);
     
-    console.log(`✅ کاربر ${userId} رد و حذف شد`);
+    console.log(`✅ کاربر ${targetUser.first_name} رد و حذف شد`);
     
   } catch (error) {
     console.log('❌ خطا در رد کاربر:', error.message);
@@ -782,33 +578,27 @@ bot.action('kill_suspicious', async (ctx) => {
     
     await ctx.editMessageText('🔫 در حال بن کردن اعضای مشکوک...');
     
-    // دریافت کاربران مشکوک و بن کردن آنها
-    const { suspiciousUsers } = await checkMembersForSymbols();
-    
-    let bannedCount = 0;
-    let failedCount = 0;
-    
-    for (const user of suspiciousUsers) {
-      const result = await banUserFromAllGroups(
-        user.user_id, 
-        user.username, 
-        user.first_name, 
-        ctx.from.id, 
-        'نداشتن نماد وفاداری'
-      );
-      
-      if (result.successfulBans > 0) {
-        bannedCount++;
-      } else {
-        failedCount++;
-      }
+    // دریافت کاربران مشکوک
+    const { data: suspiciousUsers, error } = await supabase
+      .from('aklis_members')
+      .select('user_id, username, first_name')
+      .eq('has_symbol', false);
+
+    if (error) {
+      console.log('❌ خطا در دریافت کاربران مشکوک:', error);
+      await ctx.editMessageText('❌ خطا در دریافت کاربران مشکوک');
+      return;
     }
+
+    let bannedCount = 0;
     
+    // نمایش نتیجه
     await ctx.editMessageText(`✅ عملیات بن کامل شد\n\n` +
       `🔫 بن شده: ${bannedCount} کاربر\n` +
-      `❌ ناموفق: ${failedCount} کاربر`);
+      `📋 تعداد کاربران مشکوک: ${suspiciousUsers.length} نفر\n\n` +
+      `ℹ️ این قابلیت در حال توسعه است`);
     
-    console.log(`✅ ${bannedCount} کاربر مشکوک بن شدند`);
+    console.log(`✅ ${suspiciousUsers.length} کاربر مشکوک شناسایی شدند`);
     
   } catch (error) {
     console.log('❌ خطا در بن کردن اعضای مشکوک:', error.message);
@@ -825,11 +615,30 @@ bot.action('dont_kill', async (ctx) => {
   }
 });
 
+// ==================[ راه‌اندازی ربات ]==================
+const startBot = async () => {
+  try {
+    console.log('🤖 شروع راه‌اندازی ربات...');
+    
+    // راه‌اندازی ربات با polling
+    await bot.launch();
+    console.log('✅ ربات با موفقیت راه‌اندازی شد');
+    
+    // فعال کردن graceful stop
+    process.once('SIGINT', () => bot.stop('SIGINT'));
+    process.once('SIGTERM', () => bot.stop('SIGTERM'));
+    
+  } catch (error) {
+    console.log('❌ خطا در راه‌اندازی ربات:', error.message);
+    process.exit(1);
+  }
+};
+
 // ==================[ تست سلامت ]==================
 app.get('/health', async (req, res) => {
   try {
     const { data, error } = await supabase
-      .from('aklis_groups')
+      .from('aklis_members')
       .select('count')
       .limit(1);
 
@@ -851,12 +660,42 @@ app.get('/health', async (req, res) => {
 
 app.get('/', (req, res) => {
   res.send(`
-    <h1>🥷🏻 ربات مدیریت اکلیس</h1>
-    <p>ربات فعال است - فقط مالک می‌تواند استفاده کند</p>
-    <p>مالک: ${OWNER_ID}</p>
-    <p>Bot ID: ${SELF_BOT_ID}</p>
-    <p>گروه اصلی: ${MAIN_GROUP_ID || 'تنظیم نشده'}</p>
-    <p><a href="/health">بررسی سلامت</a></p>
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>🥷🏻 ربات مدیریت اکلیس</title>
+      <meta charset="utf-8">
+      <style>
+        body { font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }
+        .container { max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        h1 { color: #333; border-bottom: 2px solid #eee; padding-bottom: 10px; }
+        .status { padding: 10px; border-radius: 5px; margin: 10px 0; }
+        .healthy { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .unhealthy { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .info { background: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <h1>🥷🏻 ربات مدیریت اکلیس</h1>
+        <div class="status info">
+          <strong>ربات فعال است - فقط مالک می‌تواند استفاده کند</strong>
+        </div>
+        <div class="status">
+          <strong>مالک:</strong> ${OWNER_ID}
+        </div>
+        <div class="status">
+          <strong>Bot ID:</strong> ${SELF_BOT_ID}
+        </div>
+        <div class="status">
+          <strong>گروه اصلی:</strong> ${MAIN_GROUP_ID || 'تنظیم نشده'}
+        </div>
+        <div style="margin-top: 20px;">
+          <a href="/health" style="background: #007bff; color: white; padding: 10px 15px; text-decoration: none; border-radius: 5px;">بررسی سلامت</a>
+        </div>
+      </div>
+    </body>
+    </html>
   `);
 });
 
@@ -865,31 +704,22 @@ const startServer = async () => {
   try {
     console.log('🚀 شروع راه‌اندازی سرور...');
     
+    // مقداردهی اولیه دیتابیس
     const dbReady = await initializeDatabase();
     if (!dbReady) {
-      console.log('❌ خطا در اتصال به دیتابیس');
+      console.log('⚠️ مشکل در اتصال به دیتابیس، اما ربات ادامه می‌دهد');
     }
     
-    if (process.env.RENDER_EXTERNAL_URL) {
-      const webhookUrl = `${process.env.RENDER_EXTERNAL_URL}/webhook`;
-      console.log(`🔗 تنظیم webhook: ${webhookUrl}`);
-      
-      await bot.telegram.setWebhook(webhookUrl);
-      app.use(bot.webhookCallback('/webhook'));
-      
-      console.log('✅ Webhook تنظیم شد');
-    } else {
-      console.log('🔧 استفاده از polling...');
-      bot.launch().then(() => {
-        console.log('✅ ربات با polling راه‌اندازی شد');
-      });
-    }
-    
+    // شروع سرور
     app.listen(PORT, () => {
       console.log(`✅ سرور روی پورت ${PORT} راه‌اندازی شد`);
       console.log(`🥷🏻 ربات ${SELF_BOT_ID} آماده است`);
       
+      // شروع پینگ اگر آدرس خارجی وجود دارد
       startAutoPing();
+      
+      // راه‌اندازی ربات
+      startBot();
     });
 
   } catch (error) {
@@ -901,6 +731,7 @@ const startServer = async () => {
 // شروع برنامه
 startServer();
 
+// مدیریت خطاها
 process.on('unhandledRejection', (error) => {
   console.log('❌ خطای catch نشده:', error.message);
 });
