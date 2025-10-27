@@ -27,6 +27,7 @@ if (!BOT_TOKEN) {
 
 if (!SUPABASE_URL || !SUPABASE_KEY) {
   console.log('❌ تنظیمات Supabase تنظیم نشده است');
+  process.exit(1);
 }
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -65,7 +66,14 @@ const startAutoPing = () => {
 
 // ==================[ بررسی مالکیت ]==================
 const checkOwnerAccess = (ctx) => {
-  const userId = ctx.from.id;
+  const userId = ctx.from?.id;
+  if (!userId) {
+    return {
+      hasAccess: false,
+      message: 'کاربر شناسایی نشد'
+    };
+  }
+  
   console.log(`🔐 بررسی دسترسی کاربر ${userId} - مالک: ${OWNER_ID}`);
   
   if (userId !== OWNER_ID) {
@@ -75,31 +83,6 @@ const checkOwnerAccess = (ctx) => {
     };
   }
   return { hasAccess: true };
-};
-
-// ==================[ مدیریت دیتابیس ]==================
-const initializeDatabase = async () => {
-  try {
-    console.log('🔧 بررسی ساختار دیتابیس...');
-    
-    // تست ساده اتصال به Supabase
-    const { data, error } = await supabase
-      .from('aklis_members')
-      .select('*')
-      .limit(1);
-    
-    if (error) {
-      console.log('⚠️ خطا در اتصال به دیتابیس:', error.message);
-      console.log('ℹ️ ربات بدون دیتابیس کار خواهد کرد');
-    } else {
-      console.log('✅ اتصال به دیتابیس موفق');
-    }
-    
-    return true;
-  } catch (error) {
-    console.log('❌ خطا در بررسی دیتابیس:', error.message);
-    return false;
-  }
 };
 
 // ==================[ ذخیره کاربر تایید شده ]==================
@@ -157,168 +140,15 @@ const isUserVerified = async (userId) => {
   }
 };
 
-// ==================[ پردازش اعضای جدید ]==================
-bot.on('new_chat_members', async (ctx) => {
-  try {
-    const chatId = ctx.chat.id.toString();
-    const isMainGroup = chatId === MAIN_GROUP_ID;
-    
-    console.log(`👥 دریافت عضو جدید در ${isMainGroup ? 'گروه اصلی' : 'زیرگروه'}`);
-
-    for (const member of ctx.message.new_chat_members) {
-      // اگر ربات اضافه شده باشد
-      if (member.is_bot && member.id === ctx.botInfo.id) {
-        const addedBy = ctx.message.from;
-        
-        // بررسی مالکیت
-        if (addedBy.id !== OWNER_ID) {
-          console.log(`🚫 کاربر ${addedBy.id} مالک نیست - لفت دادن از گروه`);
-          await ctx.reply('فقط آکی حق داره دستور بده بهم');
-          
-          try {
-            await ctx.leaveChat();
-            console.log('✅ ربات با موفقیت از گروه خارج شد');
-          } catch (leaveError) {
-            console.log('❌ خطا در خروج از گروه:', leaveError.message);
-          }
-          return;
-        }
-        
-        console.log(`✅ ربات توسط مالک ${addedBy.id} اضافه شد`);
-        await ctx.reply('🥷🏻 نینجای اکلیس در خدمت شماست!');
-        return;
-      }
-
-      // اگر کاربر عادی اضافه شده باشد
-      if (!member.is_bot) {
-        const userId = member.id;
-        const username = member.username;
-        const firstName = member.first_name;
-
-        if (isMainGroup) {
-          // در گروه اصلی - درخواست تایید از مالک
-          console.log(`🆕 کاربر جدید در گروه اصلی: ${firstName} (${userId})`);
-          
-          const requestMessage = `آیا این غریبه اجازه ورود به اکلیس رو داره ؟\n\n` +
-            `👤 کاربر: ${firstName}\n` +
-            `🆔 آیدی: ${userId}\n` +
-            `📝 نام کاربری: @${username || 'ندارد'}`;
-
-          const keyboard = Markup.inlineKeyboard([
-            [Markup.button.callback('✅ آره', `approve_${userId}`)],
-            [Markup.button.callback('❌ نه', `reject_${userId}`)]
-          ]);
-
-          await ctx.reply(requestMessage, keyboard);
-        } else {
-          // در زیرگروه - بررسی تایید کاربر
-          console.log(`🔍 بررسی تایید کاربر ${firstName} برای زیرگروه...`);
-          
-          const isVerified = await isUserVerified(userId);
-          
-          if (!isVerified) {
-            console.log(`🚫 کاربر ${firstName} تایید نشده - بن کردن`);
-            
-            // بن کردن کاربر
-            try {
-              await ctx.banChatMember(userId);
-              console.log(`✅ کاربر از زیرگروه بن شد`);
-              
-              // اطلاع به گروه اصلی
-              if (MAIN_GROUP_ID) {
-                const now = new Date();
-                const timeString = now.toLocaleTimeString('fa-IR', { 
-                  hour: '2-digit', 
-                  minute: '2-digit'
-                });
-                
-                const alertMessage = `🚨 یک مزاحم وارد قلمرو اکلیس شده\n\n` +
-                  `👤 نام: ${firstName}\n` +
-                  `🆔 آیدی عددی: ${userId}\n` +
-                  `📝 آیدی شخصی: @${username || 'ندارد'}\n` +
-                  `🕒 زمان ورود: ${timeString}\n` +
-                  `📍 گروه: ${ctx.chat.title || 'بدون عنوان'}`;
-                  
-                await bot.telegram.sendMessage(MAIN_GROUP_ID, alertMessage);
-              }
-            } catch (banError) {
-              console.log('❌ خطا در بن کردن کاربر:', banError.message);
-            }
-          } else {
-            console.log(`✅ کاربر ${firstName} تایید شده - اجازه ورود`);
-          }
-        }
-      }
-    }
-  } catch (error) {
-    console.log('❌ خطا در پردازش عضو جدید:', error.message);
-  }
-});
-
-// ==================[ پردازش پیام‌ها در گروه اصلی ]==================
-bot.on('message', async (ctx) => {
-  try {
-    // فقط پیام‌های گروهی پردازش شوند
-    if (ctx.chat.type === 'private') return;
-    
-    const chatId = ctx.chat.id.toString();
-    const userId = ctx.from.id;
-    const isMainGroup = chatId === MAIN_GROUP_ID;
-    
-    // اگر در گروه اصلی نیستیم، خروج
-    if (!isMainGroup) return;
-    
-    // اگر مالک است، اجازه صحبت دارد
-    if (userId === OWNER_ID) return;
-    
-    // اگر پیام دستور است، پردازش نکن (اجازه بده دستورات توسط handlerهای اصلی پردازش شوند)
-    if (ctx.message.text && ctx.message.text.startsWith('/')) {
-      return;
-    }
-    
-    // بررسی تایید کاربر
-    const isVerified = await isUserVerified(userId);
-    
-    if (!isVerified) {
-      console.log(`🚫 کاربر ${userId} تایید نشده - حذف پیام`);
-      
-      // حذف پیام کاربر
-      try {
-        await ctx.deleteMessage();
-      } catch (deleteError) {
-        console.log('❌ خطا در حذف پیام:', deleteError.message);
-      }
-      
-      // اخطار به کاربر
-      const warningMessage = `👤 ${ctx.from.first_name}\n` +
-        `شما اجازه صحبت ندارین تا زمانی که اونر اجازه ورود رو بده`;
-        
-      try {
-        const warning = await ctx.reply(warningMessage);
-        // حذف پیام اخطار بعد از 5 ثانیه
-        setTimeout(async () => {
-          try {
-            await ctx.deleteMessage(warning.message_id);
-          } catch (e) {}
-        }, 5000);
-      } catch (warningError) {
-        console.log('❌ خطا در ارسال اخطار:', warningError.message);
-      }
-    }
-  } catch (error) {
-    console.log('❌ خطا در پردازش پیام:', error.message);
-  }
-});
-
-// ==================[ دستورات ]==================
+// ==================[ دستورات - FIXED ]==================
 
 // دکمه استارت
 bot.start((ctx) => {
-  console.log('🎯 دستور استارت از:', ctx.from.first_name, 'آیدی:', ctx.from.id);
+  console.log('🎯 دستور استارت از:', ctx.from?.first_name, 'آیدی:', ctx.from?.id);
   
   const access = checkOwnerAccess(ctx);
   if (!access.hasAccess) {
-    console.log('🚫 دسترسی غیرمجاز از کاربر:', ctx.from.id);
+    console.log('🚫 دسترسی غیرمجاز');
     return ctx.reply(access.message);
   }
   
@@ -330,8 +160,6 @@ bot.start((ctx) => {
     `🔹 /checkmembers - بررسی اعضای اکلیس\n` +
     `🔹 /status - وضعیت ربات\n\n` +
     `🏠 گروه اصلی: ${MAIN_GROUP_ID ? 'تنظیم شده' : 'تنظیم نشده'}`;
-  
-  console.log('📤 ارسال پیام استارت به مالک');
   
   if (ctx.chat.type === 'private') {
     return ctx.reply(replyText, Markup.keyboard([
@@ -346,7 +174,7 @@ bot.start((ctx) => {
 // دستور بن کردن کاربر
 bot.command('ban', async (ctx) => {
   try {
-    console.log('⚠️ درخواست بن از:', ctx.from.first_name, 'آیدی:', ctx.from.id);
+    console.log('⚠️ درخواست بن از:', ctx.from?.first_name, 'آیدی:', ctx.from?.id);
     
     const access = checkOwnerAccess(ctx);
     if (!access.hasAccess) {
@@ -354,45 +182,41 @@ bot.command('ban', async (ctx) => {
       return ctx.reply(access.message);
     }
 
-    // بررسی آرگومان
     const args = ctx.message.text.split(' ');
     if (args.length < 2) {
-      console.log('❌ دستور ban بدون آیدی استفاده شده');
+      console.log('❌ دستور ban بدون آیدی');
       return ctx.reply('❌ لطفاً آیدی کاربر را وارد کنید.\n\nمثال:\n<code>/ban @username</code>', { 
         parse_mode: 'HTML' 
       });
     }
 
     const targetUsername = args[1].replace('@', '');
-    console.log(`🎯 بن کاربر با آیدی: @${targetUsername}`);
+    console.log(`🎯 بن کاربر: @${targetUsername}`);
 
-    // زمان به صورت خلاصه
     const now = new Date();
     const timeString = now.toLocaleTimeString('fa-IR', { 
       hour: '2-digit', 
       minute: '2-digit'
     });
 
-    // پیام نتیجه
     const resultMessage = `🚫 کاربر بن شد\n\n` +
       `👤 @${targetUsername}\n` +
       `📋 از تمام گروه‌های اکلیس بن شد\n` +
       `🕒 ${timeString}`;
 
     await ctx.reply(resultMessage);
-
-    console.log(`✅ دستور ban برای کاربر @${targetUsername} اجرا شد`);
+    console.log(`✅ دستور ban برای @${targetUsername} اجرا شد`);
 
   } catch (error) {
     console.log('❌ خطا در اجرای دستور ban:', error.message);
-    await ctx.reply('❌ خطا در اجرای دستور ban. لطفاً دوباره تلاش کنید.');
+    await ctx.reply('❌ خطا در اجرای دستور ban');
   }
 });
 
 // دستور بررسی اعضای اکلیس
 bot.command('checkmembers', async (ctx) => {
   try {
-    console.log('🔍 درخواست بررسی اعضا از:', ctx.from.first_name);
+    console.log('🔍 درخواست بررسی اعضا از:', ctx.from?.first_name);
     
     const access = checkOwnerAccess(ctx);
     if (!access.hasAccess) {
@@ -402,7 +226,6 @@ bot.command('checkmembers', async (ctx) => {
 
     await ctx.reply('🔍 در حال بررسی اعضای اکلیس...');
     
-    // دریافت کاربران تایید شده از دیتابیس
     const { data: members, error } = await supabase
       .from('aklis_members')
       .select('user_id, username, first_name, has_symbol');
@@ -442,7 +265,7 @@ bot.command('checkmembers', async (ctx) => {
 // مشاهده لیست گروه‌ها
 bot.command('groups', async (ctx) => {
   try {
-    console.log('📋 درخواست لیست گروه‌ها از:', ctx.from.first_name);
+    console.log('📋 درخواست لیست گروه‌ها از:', ctx.from?.first_name);
     
     const access = checkOwnerAccess(ctx);
     if (!access.hasAccess) {
@@ -450,11 +273,8 @@ bot.command('groups', async (ctx) => {
       return ctx.reply(access.message);
     }
 
-    console.log('✅ دسترسی مالک برای لیست گروه‌ها تأیید شد');
-
     let message = `🏘️ لیست گروه‌های اکلیس\n\n`;
     
-    // اگر گروه اصلی تنظیم شده باشد
     if (MAIN_GROUP_ID) {
       message += `🏠 گروه اصلی: تنظیم شده\n`;
       message += `🆔: ${MAIN_GROUP_ID}\n\n`;
@@ -464,8 +284,6 @@ bot.command('groups', async (ctx) => {
     
     message += `📊 گروه‌های زیرمجموعه: در حال توسعه...\n\n`;
     message += `ℹ️ این بخش در حال تکمیل می‌باشد`;
-
-    console.log('📤 ارسال لیست گروه‌ها');
     
     await ctx.reply(message);
 
@@ -478,16 +296,13 @@ bot.command('groups', async (ctx) => {
 // وضعیت ربات
 bot.command('status', async (ctx) => {
   try {
-    console.log('📈 درخواست وضعیت از:', ctx.from.first_name);
+    console.log('📈 درخواست وضعیت از:', ctx.from?.first_name);
     
     const access = checkOwnerAccess(ctx);
     if (!access.hasAccess) {
       return ctx.reply(access.message);
     }
 
-    console.log('🔍 دریافت آمار از دیتابیس...');
-
-    // دریافت آمار
     const { data: members, error: membersError } = await supabase
       .from('aklis_members')
       .select('user_id');
@@ -511,12 +326,167 @@ bot.command('status', async (ctx) => {
     statusMessage += `• /groups - لیست گروه‌ها`;
 
     console.log(`📊 آمار: ${totalMembers} عضو, ${totalBanned} بن شده`);
-
     await ctx.reply(statusMessage);
 
   } catch (error) {
     console.log('❌ خطا در دریافت وضعیت:', error.message);
     await ctx.reply('❌ خطا در دریافت وضعیت ربات.');
+  }
+});
+
+// ==================[ مدیریت اعضای جدید ]==================
+bot.on('new_chat_members', async (ctx) => {
+  try {
+    console.log('👥 دریافت عضو جدید');
+    
+    const chatId = ctx.chat.id.toString();
+    const isMainGroup = chatId === MAIN_GROUP_ID;
+    
+    console.log(`📍 گروه: ${isMainGroup ? 'اصلی' : 'زیرگروه'} (${chatId})`);
+
+    for (const member of ctx.message.new_chat_members) {
+      // اگر ربات اضافه شده باشد
+      if (member.is_bot && member.username === SELF_BOT_ID) {
+        const addedBy = ctx.message.from;
+        
+        console.log(`🤖 ربات توسط ${addedBy.id} اضافه شد`);
+        
+        // بررسی مالکیت
+        if (addedBy.id !== OWNER_ID) {
+          console.log(`🚫 کاربر ${addedBy.id} مالک نیست - لفت دادن`);
+          await ctx.reply('فقط آکی حق داره دستور بده بهم');
+          
+          try {
+            await ctx.leaveChat();
+            console.log('✅ ربات از گروه خارج شد');
+          } catch (leaveError) {
+            console.log('❌ خطا در خروج از گروه:', leaveError.message);
+          }
+          return;
+        }
+        
+        console.log(`✅ ربات توسط مالک اضافه شد`);
+        await ctx.reply('🥷🏻 نینجای اکلیس در خدمت شماست!');
+        return;
+      }
+
+      // اگر کاربر عادی اضافه شده باشد
+      if (!member.is_bot) {
+        const userId = member.id;
+        const username = member.username;
+        const firstName = member.first_name;
+
+        console.log(`👤 کاربر جدید: ${firstName} (@${username}) - ${userId}`);
+
+        if (isMainGroup) {
+          // در گروه اصلی - درخواست تایید از مالک
+          console.log(`🆕 درخواست تایید برای کاربر جدید در گروه اصلی`);
+          
+          const requestMessage = `آیا این غریبه اجازه ورود به اکلیس رو داره ؟\n\n` +
+            `👤 کاربر: ${firstName}\n` +
+            `🆔 آیدی: ${userId}\n` +
+            `📝 نام کاربری: @${username || 'ندارد'}`;
+
+          const keyboard = Markup.inlineKeyboard([
+            [Markup.button.callback('✅ آره', `approve_${userId}`)],
+            [Markup.button.callback('❌ نه', `reject_${userId}`)]
+          ]);
+
+          await ctx.reply(requestMessage, keyboard);
+        } else {
+          // در زیرگروه - بررسی تایید کاربر
+          console.log(`🔍 بررسی تایید کاربر برای زیرگروه...`);
+          
+          const isVerified = await isUserVerified(userId);
+          
+          if (!isVerified) {
+            console.log(`🚫 کاربر تایید نشده - بن کردن`);
+            
+            try {
+              await ctx.banChatMember(userId);
+              console.log(`✅ کاربر از زیرگروه بن شد`);
+              
+              // اطلاع به گروه اصلی
+              if (MAIN_GROUP_ID) {
+                const now = new Date();
+                const timeString = now.toLocaleTimeString('fa-IR', { 
+                  hour: '2-digit', 
+                  minute: '2-digit'
+                });
+                
+                const alertMessage = `🚨 یک مزاحم وارد قلمرو اکلیس شده\n\n` +
+                  `👤 نام: ${firstName}\n` +
+                  `🆔 آیدی عددی: ${userId}\n` +
+                  `📝 آیدی شخصی: @${username || 'ندارد'}\n` +
+                  `🕒 زمان ورود: ${timeString}\n` +
+                  `📍 گروه: ${ctx.chat.title || 'بدون عنوان'}`;
+                  
+                await bot.telegram.sendMessage(MAIN_GROUP_ID, alertMessage);
+              }
+            } catch (banError) {
+              console.log('❌ خطا در بن کردن کاربر:', banError.message);
+            }
+          } else {
+            console.log(`✅ کاربر تایید شده - اجازه ورود`);
+          }
+        }
+      }
+    }
+  } catch (error) {
+    console.log('❌ خطا در پردازش عضو جدید:', error.message);
+  }
+});
+
+// ==================[ پردازش پیام‌ها ]==================
+bot.on('message', async (ctx) => {
+  try {
+    // فقط پیام‌های گروهی پردازش شوند
+    if (ctx.chat.type === 'private') return;
+    
+    const chatId = ctx.chat.id.toString();
+    const userId = ctx.from?.id;
+    const isMainGroup = chatId === MAIN_GROUP_ID;
+    
+    // اگر در گروه اصلی نیستیم، خروج
+    if (!isMainGroup) return;
+    
+    // اگر مالک است، اجازه صحبت دارد
+    if (userId === OWNER_ID) return;
+    
+    // اگر پیام دستور است، پردازش نکن - اجازه بده دستورات پردازش شوند
+    if (ctx.message.text && ctx.message.text.startsWith('/')) {
+      return;
+    }
+    
+    // بررسی تایید کاربر
+    const isVerified = await isUserVerified(userId);
+    
+    if (!isVerified) {
+      console.log(`🚫 کاربر ${userId} تایید نشده - حذف پیام`);
+      
+      try {
+        await ctx.deleteMessage();
+        
+        // اخطار به کاربر
+        const warningMessage = `👤 ${ctx.from.first_name}\n` +
+          `شما اجازه صحبت ندارین تا زمانی که اونر اجازه ورود رو بده`;
+          
+        const warning = await ctx.reply(warningMessage);
+        
+        // حذف پیام اخطار بعد از 5 ثانیه
+        setTimeout(async () => {
+          try {
+            await ctx.deleteMessage(warning.message_id);
+          } catch (e) {
+            console.log('خطا در حذف پیام اخطار:', e.message);
+          }
+        }, 5000);
+      } catch (deleteError) {
+        console.log('❌ خطا در حذف پیام:', deleteError.message);
+      }
+    }
+  } catch (error) {
+    console.log('❌ خطا در پردازش پیام:', error.message);
   }
 });
 
@@ -529,15 +499,12 @@ bot.action(/approve_(\d+)/, async (ctx) => {
     
     console.log(`✅ تایید کاربر ${userId} توسط مالک`);
     
-    // ذخیره کاربر تایید شده
     await saveVerifiedUser(userId, targetUser.username, targetUser.first_name, ctx.from.id);
     
-    // پیام خوش‌آمدگویی
     const welcomeMessage = `👤 ${targetUser.first_name}\n` +
       `خوش اومدی به جهان بزرگ اکلیس 🎉`;
     
     await ctx.editMessageText(welcomeMessage);
-    
     console.log(`✅ کاربر ${targetUser.first_name} تایید شد`);
     
   } catch (error) {
@@ -554,7 +521,6 @@ bot.action(/reject_(\d+)/, async (ctx) => {
     
     console.log(`❌ رد کاربر ${userId} توسط مالک`);
     
-    // حذف کاربر از گروه
     try {
       await ctx.banChatMember(userId);
       console.log(`✅ کاربر از گروه حذف شد`);
@@ -563,7 +529,6 @@ bot.action(/reject_(\d+)/, async (ctx) => {
     }
     
     await ctx.editMessageText(`❌ کاربر ${targetUser.first_name} رد شد و حذف گردید`);
-    
     console.log(`✅ کاربر ${targetUser.first_name} رد و حذف شد`);
     
   } catch (error) {
@@ -578,7 +543,6 @@ bot.action('kill_suspicious', async (ctx) => {
     
     await ctx.editMessageText('🔫 در حال بن کردن اعضای مشکوک...');
     
-    // دریافت کاربران مشکوک
     const { data: suspiciousUsers, error } = await supabase
       .from('aklis_members')
       .select('user_id, username, first_name')
@@ -592,7 +556,6 @@ bot.action('kill_suspicious', async (ctx) => {
 
     let bannedCount = 0;
     
-    // نمایش نتیجه
     await ctx.editMessageText(`✅ عملیات بن کامل شد\n\n` +
       `🔫 بن شده: ${bannedCount} کاربر\n` +
       `📋 تعداد کاربران مشکوک: ${suspiciousUsers.length} نفر\n\n` +
@@ -615,18 +578,33 @@ bot.action('dont_kill', async (ctx) => {
   }
 });
 
-// ==================[ راه‌اندازی ربات ]==================
+// ==================[ راه‌اندازی ربات - FIXED ]==================
 const startBot = async () => {
   try {
     console.log('🤖 شروع راه‌اندازی ربات...');
     
+    // تست ربات
+    const botInfo = await bot.telegram.getMe();
+    console.log(`✅ ربات ${botInfo.username} شناسایی شد`);
+    
     // راه‌اندازی ربات با polling
-    await bot.launch();
+    await bot.launch({
+      dropPendingUpdates: true,
+      allowedUpdates: ['message', 'chat_member', 'callback_query']
+    });
+    
     console.log('✅ ربات با موفقیت راه‌اندازی شد');
     
     // فعال کردن graceful stop
-    process.once('SIGINT', () => bot.stop('SIGINT'));
-    process.once('SIGTERM', () => bot.stop('SIGTERM'));
+    process.once('SIGINT', () => {
+      console.log('🛑 دریافت SIGINT - خاموش کردن ربات...');
+      bot.stop('SIGINT');
+    });
+    
+    process.once('SIGTERM', () => {
+      console.log('🛑 دریافت SIGTERM - خاموش کردن ربات...');
+      bot.stop('SIGTERM');
+    });
     
   } catch (error) {
     console.log('❌ خطا در راه‌اندازی ربات:', error.message);
@@ -704,18 +682,12 @@ const startServer = async () => {
   try {
     console.log('🚀 شروع راه‌اندازی سرور...');
     
-    // مقداردهی اولیه دیتابیس
-    const dbReady = await initializeDatabase();
-    if (!dbReady) {
-      console.log('⚠️ مشکل در اتصال به دیتابیس، اما ربات ادامه می‌دهد');
-    }
-    
     // شروع سرور
     app.listen(PORT, () => {
       console.log(`✅ سرور روی پورت ${PORT} راه‌اندازی شد`);
       console.log(`🥷🏻 ربات ${SELF_BOT_ID} آماده است`);
       
-      // شروع پینگ اگر آدرس خارجی وجود دارد
+      // شروع پینگ
       startAutoPing();
       
       // راه‌اندازی ربات
