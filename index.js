@@ -40,14 +40,14 @@ bot.catch((err, ctx) => {
   console.log(`❌ خطا در ربات:`, err);
 });
 
-// ==================[ پینگ بهبود یافته ]==================
+// ==================[ پینگ ]==================
 const startAutoPing = () => {
   if (!process.env.RENDER_EXTERNAL_URL) {
     console.log('⚠️ RENDER_EXTERNAL_URL تنظیم نشده');
     return;
   }
   
-  const PING_INTERVAL = 10 * 60 * 1000; // افزایش به 10 دقیقه
+  const PING_INTERVAL = 10 * 60 * 1000;
   const selfUrl = process.env.RENDER_EXTERNAL_URL;
 
   const performPing = async () => {
@@ -91,29 +91,38 @@ const checkOwnerAccessCallback = (ctx) => {
   return userId === OWNER_ID;
 };
 
-// ==================[ بررسی نمادهای وفاداری - FIXED COMPLETELY ]==================
+// ==================[ بررسی نمادهای وفاداری - COMPLETELY REWRITTEN ]==================
 const checkLoyaltySymbols = (text) => {
-  if (!text || text === 'null' || text === 'undefined') {
+  if (!text || text === 'null' || text === 'undefined' || text === '') {
     console.log('📝 متن برای بررسی نماد خالی یا نامعتبر است');
     return false;
   }
   
-  // فقط 4 نماد اصلی
+  // نمادهای اصلی
   const symbols = ['꩘', '𖢻', 'ꑭ', '𖮌'];
   
-  const textStr = String(text).trim();
+  const textStr = String(text);
   console.log(`🔍 بررسی نماد در متن: "${textStr}" (طول: ${textStr.length})`);
+  console.log(`🔍 کدهای کاراکتر:`, Array.from(textStr).map(char => char.charCodeAt(0).toString(16)));
   
-  // بررسی هر کاراکتر به صورت جداگانه
+  // بررسی دقیق هر کاراکتر
   for (let i = 0; i < textStr.length; i++) {
     const char = textStr[i];
-    if (symbols.includes(char)) {
-      console.log(`✅ نماد "${char}" در موقعیت ${i} پیدا شد`);
-      return true;
+    const charCode = char.charCodeAt(0).toString(16);
+    
+    for (const symbol of symbols) {
+      const symbolCode = symbol.charCodeAt(0).toString(16);
+      
+      if (char === symbol) {
+        console.log(`✅ نماد "${char}" (کد: ${charCode}) در موقعیت ${i} پیدا شد`);
+        console.log(`✅ نماد مورد انتظار "${symbol}" (کد: ${symbolCode})`);
+        return true;
+      }
     }
   }
   
   console.log(`❌ هیچ نمادی در متن "${textStr}" پیدا نشد`);
+  console.log(`🔍 نمادهای مورد انتظار:`, symbols);
   return false;
 };
 
@@ -187,13 +196,13 @@ const getActiveSubgroups = async () => {
   }
 };
 
-// ==================[ ذخیره کاربر تایید شده - IMPROVED ]==================
+// ==================[ ذخیره کاربر تایید شده ]==================
 const saveVerifiedUser = async (userId, username, firstName, verifiedBy) => {
   try {
     console.log(`💾 ذخیره کاربر تایید شده ${userId}...`);
     console.log(`📝 اطلاعات کاربر: نام: "${firstName}", کاربری: "${username}"`);
     
-    // بررسی نماد وفاداری با 4 نماد اصلی
+    // بررسی نماد وفاداری
     const hasSymbol = checkLoyaltySymbols(firstName) || checkLoyaltySymbols(username);
 
     console.log(`🔍 نتیجه بررسی نماد برای ${firstName} (@${username}): ${hasSymbol}`);
@@ -222,7 +231,7 @@ const saveVerifiedUser = async (userId, username, firstName, verifiedBy) => {
   }
 };
 
-// ==================[ اسکن و ذخیره تمام اعضای گروه - NEW FUNCTION ]==================
+// ==================[ اسکن و ذخیره تمام اعضای گروه ]==================
 const scanAndSaveAllMembers = async (ctx) => {
   try {
     console.log('🔍 شروع اسکن تمام اعضای گروه...');
@@ -235,7 +244,7 @@ const scanAndSaveAllMembers = async (ctx) => {
       const chat = await ctx.telegram.getChat(chatId);
       console.log(`📊 اسکن گروه: ${chat.title}`);
       
-      // دریافت لیست مدیران (که شامل تمام اعضا نیست، اما شروع خوبیه)
+      // دریافت لیست مدیران
       const administrators = await ctx.telegram.getChatAdministrators(chatId);
       console.log(`👥 تعداد مدیران: ${administrators.length}`);
       
@@ -250,10 +259,6 @@ const scanAndSaveAllMembers = async (ctx) => {
           });
         }
       }
-      
-      // در اینجا باید تمام اعضا را دریافت کنیم
-      // اما تلگرام API مستقیم برای دریافت تمام اعضا ندارد
-      // بنابراین از روش جایگزین استفاده می‌کنیم
       
     } catch (error) {
       console.log('❌ خطا در دریافت اطلاعات گروه:', error.message);
@@ -276,7 +281,6 @@ const scanAndSaveAllMembers = async (ctx) => {
     }
     
     let savedCount = 0;
-    let updatedCount = 0;
     
     // ذخیره یا آپدیت تمام اعضا
     for (const member of allMembers) {
@@ -429,7 +433,7 @@ const banUserFromEcosystem = async (userId, username, firstName) => {
 
 // ==================[ دستورات ]==================
 
-// دکمه استارت
+// دکمه استارت - SIMPLIFIED
 bot.start((ctx) => {
   console.log('🎯 دستور استارت از:', ctx.from?.first_name, 'آیدی:', ctx.from?.id);
   
@@ -441,23 +445,10 @@ bot.start((ctx) => {
   
   console.log('✅ دسترسی مالک تأیید شد');
   
-  const replyText = `🥷🏻 نینجای اکلیس در خدمت شماست\n\n` +
-    `🔹 /ban [آیدی] - بن کردن کاربر\n` +
-    `🔹 /groups - مشاهده لیست گروه‌ها\n` +
-    `🔹 /checkmembers - بررسی اعضای اکلیس\n` +
-    `🔹 /scanmembers - اسکن و ذخیره تمام اعضا\n` +
-    `🔹 /status - وضعیت ربات\n\n` +
-    `🏠 گروه اصلی: ${MAIN_GROUP_ID ? 'تنظیم شده' : 'تنظیم نشده'}`;
-  
-  if (ctx.chat.type === 'private') {
-    return ctx.reply(replyText, Markup.keyboard([
-      ['/ban', '/groups'],
-      ['/checkmembers', '/status'],
-      ['/scanmembers']
-    ]).resize());
-  } else {
-    return ctx.reply(replyText);
-  }
+  // فقط این پیام ساده - بدون دکمه و دستورات
+  return ctx.reply('نینجای شماره چهار در خدمت شماست', {
+    reply_to_message_id: ctx.message.message_id
+  });
 });
 
 // دستور بن کردن کاربر
@@ -502,33 +493,6 @@ bot.command('ban', async (ctx) => {
   }
 });
 
-// دستور اسکن و ذخیره تمام اعضا - NEW COMMAND
-bot.command('scanmembers', async (ctx) => {
-  try {
-    console.log('🔍 درخواست اسکن اعضا از:', ctx.from?.first_name);
-    
-    const access = checkOwnerAccess(ctx);
-    if (!access.hasAccess) {
-      console.log('🚫 دسترسی غیرمجاز برای اسکن');
-      return ctx.reply(access.message);
-    }
-
-    await ctx.reply('🔍 در حال اسکن و ذخیره تمام اعضای گروه... این فرآیند ممکن است چند دقیقه طول بکشد.');
-    
-    const result = await scanAndSaveAllMembers(ctx);
-    
-    if (result.success) {
-      await ctx.reply(`✅ اسکن کامل شد!\n\n📊 تعداد کاربران ذخیره/آپدیت شده: ${result.saved}`);
-    } else {
-      await ctx.reply('❌ خطا در اسکن اعضا. لطفاً لاگ‌ها را بررسی کنید.');
-    }
-
-  } catch (error) {
-    console.log('❌ خطا در اسکن اعضا:', error.message);
-    await ctx.reply('❌ خطا در اسکن اعضا.');
-  }
-});
-
 // دستور بررسی اعضای اکلیس - IMPROVED
 bot.command('checkmembers', async (ctx) => {
   try {
@@ -547,7 +511,7 @@ bot.command('checkmembers', async (ctx) => {
       return ctx.reply(access.message);
     }
 
-    await ctx.reply('🔍 در حال بررسی اعضای اکلیس...');
+    await ctx.reply('🔍 در حال اسکن و بررسی اعضای اکلیس...');
     
     // ابتدا یک اسکن سریع انجام می‌دهیم
     await scanAndSaveAllMembers(ctx);
@@ -573,21 +537,9 @@ bot.command('checkmembers', async (ctx) => {
     message += `✅ اعضای وفادار: ${loyalUsers.length} نفر\n`;
     message += `⚠️ اعضای مشکوک: ${suspiciousUsers.length} نفر\n\n`;
 
-    // نمایش نمونه‌ای از کاربران وفادار
-    if (loyalUsers.length > 0) {
-      message += `📋 نمونه‌ای از وفاداران:\n`;
-      loyalUsers.slice(0, 5).forEach((user, index) => {
-        message += `${index + 1}. ${user.first_name} (@${user.username || 'ندارد'})\n`;
-      });
-      if (loyalUsers.length > 5) {
-        message += `... و ${loyalUsers.length - 5} کاربر دیگر\n\n`;
-      } else {
-        message += `\n`;
-      }
-    }
-
     if (suspiciousUsers.length > 0) {
-      message += `آیا ${suspiciousUsers.length} اعضای مشکوک رو از کل اکوسیستم (گروه اصلی و تمام زیرمجموعه‌ها) بکشم ؟`;
+      // پیام جدید طبق درخواست
+      message += `آیا ${suspiciousUsers.length} عضو مشکوک توی کل اکوسیستم اکلیس رو بکشم ؟`;
       
       const keyboard = Markup.inlineKeyboard([
         [Markup.button.callback('✅ آره', 'kill_suspicious')],
@@ -688,11 +640,6 @@ bot.command('status', async (ctx) => {
     statusMessage += `🔹 زیرمجموعه‌های فعال: ${totalSubgroups}\n`;
     statusMessage += `🔹 وضعیت دیتابیس: ${membersError ? 'قطع ❌' : 'متصل ✅'}\n`;
     statusMessage += `🔹 وضعیت ربات: فعال ✅\n\n`;
-    statusMessage += `⚡ دستورات:\n`;
-    statusMessage += `• /ban @username - بن کاربر\n`;
-    statusMessage += `• /checkmembers - بررسی اعضا\n`;
-    statusMessage += `• /scanmembers - اسکن اعضا\n`;
-    statusMessage += `• /groups - لیست گروه‌ها`;
 
     console.log(`📊 آمار: ${totalMembers} عضو, ${loyalMembers} وفادار, ${suspiciousMembers} مشکوک, ${totalBanned} بن شده, ${totalSubgroups} زیرمجموعه`);
     await ctx.reply(statusMessage);
@@ -703,163 +650,11 @@ bot.command('status', async (ctx) => {
   }
 });
 
-// بقیه کدها (مدیریت اعضای جدید، پردازش پیام‌ها، callback ها و...) مانند قبل باقی می‌مانند
-// فقط تابع checkLoyaltySymbols و saveVerifiedUser به روز شده‌اند
-
-// ==================[ راه‌اندازی ربات با مدیریت خطای بهتر ]==================
-const startBot = async () => {
+// ==================[ مدیریت اضافه شدن ربات به چت‌ها ]==================
+bot.on('message', async (ctx) => {
   try {
-    console.log('🤖 شروع راه‌اندازی ربات...');
-    
-    // تست اتصال به تلگرام
-    const botInfo = await bot.telegram.getMe();
-    console.log(`✅ ربات ${botInfo.username} شناسایی شد`);
-    
-    // تست اتصال به دیتابیس
-    const { data, error } = await supabase
-      .from('aklis_members')
-      .select('count')
-      .limit(1);
-    
-    if (error) {
-      console.log('❌ خطا در اتصال به دیتابیس:', error);
-    } else {
-      console.log('✅ اتصال به دیتابیس موفق');
-    }
-    
-    // راه‌اندازی ربات با polling
-    await bot.launch({
-      dropPendingUpdates: true,
-      allowedUpdates: ['message', 'chat_member', 'callback_query'],
-      polling: {
-        timeout: 30,
-        limit: 100
-      }
-    });
-    
-    console.log('✅ ربات با موفقیت راه‌اندازی شد');
-    
-    // فعال کردن graceful stop
-    process.once('SIGINT', () => {
-      console.log('🛑 دریافت SIGINT - خاموش کردن ربات...');
-      bot.stop('SIGINT');
-    });
-    
-    process.once('SIGTERM', () => {
-      console.log('🛑 دریافت SIGTERM - خاموش کردن ربات...');
-      bot.stop('SIGTERM');
-    });
-    
-  } catch (error) {
-    if (error.response && error.response.error_code === 409) {
-      console.log('❌ خطا: یک نمونه دیگر از ربات در حال اجراست');
-      console.log('💡 راه حل: نمونه‌های دیگر ربات را متوقف کنید یا 10 ثانیه صبر کنید');
-    } else {
-      console.log('❌ خطا در راه‌اندازی ربات:', error.message);
-    }
-    process.exit(1);
-  }
-};
-
-// ==================[ تست سلامت ]==================
-app.get('/health', async (req, res) => {
-  try {
-    const { data, error } = await supabase
-      .from('aklis_members')
-      .select('count')
-      .limit(1);
-
-    // تست اتصال به تلگرام
-    const botInfo = await bot.telegram.getMe();
-
-    res.json({
-      status: 'healthy',
-      bot: botInfo.username,
-      database: error ? 'disconnected' : 'connected',
-      owner: OWNER_ID,
-      main_group: MAIN_GROUP_ID,
-      timestamp: new Date().toISOString()
-    });
-  } catch (error) {
-    res.status(500).json({
-      status: 'unhealthy',
-      error: error.message
-    });
-  }
-});
-
-app.get('/', (req, res) => {
-  res.send(`
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <title>🥷🏻 ربات مدیریت اکلیس</title>
-      <meta charset="utf-8">
-      <style>
-        body { font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }
-        .container { max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        h1 { color: #333; border-bottom: 2px solid #eee; padding-bottom: 10px; }
-        .status { padding: 10px; border-radius: 5px; margin: 10px 0; }
-        .healthy { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
-        .unhealthy { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
-        .info { background: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
-      </style>
-    </head>
-    <body>
-      <div class="container">
-        <h1>🥷🏻 ربات مدیریت اکلیس</h1>
-        <div class="status info">
-          <strong>ربات فعال است - فقط مالک می‌تواند استفاده کند</strong>
-        </div>
-        <div class="status">
-          <strong>مالک:</strong> ${OWNER_ID}
-        </div>
-        <div class="status">
-          <strong>Bot ID:</strong> ${SELF_BOT_ID}
-        </div>
-        <div class="status">
-          <strong>گروه اصلی:</strong> ${MAIN_GROUP_ID || 'تنظیم نشده'}
-        </div>
-        <div style="margin-top: 20px;">
-          <a href="/health" style="background: #007bff; color: white; padding: 10px 15px; text-decoration: none; border-radius: 5px;">بررسی سلامت</a>
-        </div>
-      </div>
-    </body>
-    </html>
-  `);
-});
-
-// ==================[ راه‌اندازی سرور ]==================
-const startServer = async () => {
-  try {
-    console.log('🚀 شروع راه‌اندازی سرور...');
-    
-    // شروع سرور
-    app.listen(PORT, () => {
-      console.log(`✅ سرور روی پورت ${PORT} راه‌اندازی شد`);
-      console.log(`🥷🏻 ربات ${SELF_BOT_ID} آماده است`);
-      
-      // شروع پینگ
-      startAutoPing();
-      
-      // راه‌اندازی ربات
-      startBot();
-    });
-
-  } catch (error) {
-    console.log('❌ خطا در راه‌اندازی سرور:', error.message);
-    process.exit(1);
-  }
-};
-
-// شروع برنامه
-startServer();
-
-// مدیریت خطاها
-process.on('unhandledRejection', (error) => {
-  console.log('❌ خطای catch نشده:', error.message);
-});
-
-process.on('uncaughtException', (error) => {
-  console.log('❌ خطای مدیریت نشده:', error);
-});
+    // اگر ربات به گروه/کانال اضافه شده باشد
+    if (ctx.message.new_chat_members) {
+      for (const member of ctx.message.new_chat_members) {
+        if (member.is_bot && member.username === SELF_BOT_ID) {
+          const chatId = ctx.chat.id
