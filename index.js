@@ -96,15 +96,33 @@ const saveVerifiedUser = async (userId, username, firstName, verifiedBy) => {
   try {
     console.log(`💾 ذخیره کاربر تایید شده ${userId}...`);
     
-    // بررسی نماد وفاداری - FIXED
+    // بررسی نماد وفاداری - FIXED COMPLETELY
     const symbols = ['꩘', '𖢻', 'ꑭ', '𖮌'];
-    const hasSymbol = symbols.some(symbol => {
-      const nameCheck = firstName && String(firstName).includes(symbol);
-      const usernameCheck = username && String(username).includes(symbol);
-      return nameCheck || usernameCheck;
-    });
+    
+    // بررسی دقیق‌تر نمادها
+    let hasSymbol = false;
+    
+    if (firstName) {
+      for (const symbol of symbols) {
+        if (String(firstName).includes(symbol)) {
+          hasSymbol = true;
+          console.log(`✅ نماد "${symbol}" در نام "${firstName}" پیدا شد`);
+          break;
+        }
+      }
+    }
+    
+    if (!hasSymbol && username) {
+      for (const symbol of symbols) {
+        if (String(username).includes(symbol)) {
+          hasSymbol = true;
+          console.log(`✅ نماد "${symbol}" در نام کاربری "${username}" پیدا شد`);
+          break;
+        }
+      }
+    }
 
-    console.log(`🔍 بررسی نماد برای ${firstName}: ${hasSymbol}`);
+    console.log(`🔍 بررسی نماد برای ${firstName} (@${username}): ${hasSymbol}`);
 
     const { error } = await supabase
       .from('aklis_members')
@@ -170,43 +188,53 @@ const getSuspiciousUsers = async () => {
   }
 };
 
-// ==================[ بن کردن کاربر از همه گروه‌ها ]==================
-const banUserFromAllGroups = async (userId, username, firstName) => {
+// ==================[ بن کردن کاربر از گروه اصلی - FIXED ]==================
+const banUserFromMainGroup = async (userId, username, firstName) => {
   try {
-    console.log(`🔫 بن کردن کاربر ${userId} از همه گروه‌ها`);
+    console.log(`🔫 بن کردن کاربر ${userId} از گروه اصلی`);
     
-    // اینجا می‌تونی لیست گروه‌هایی که ربات توشه رو از دیتابیس بخونی
-    // فعلاً فقط گروه اصلی رو بن می‌کنیم
-    if (MAIN_GROUP_ID) {
-      try {
-        await bot.telegram.banChatMember(MAIN_GROUP_ID, userId);
-        console.log(`✅ کاربر از گروه اصلی بن شد`);
-        
-        // ذخیره در جدول بن شده‌ها
-        const { error } = await supabase
-          .from('aklis_banned')
-          .upsert({
-            user_id: userId,
-            username: username || '',
-            first_name: firstName || 'ناشناس',
-            banned_at: new Date().toISOString(),
-            banned_by: OWNER_ID
-          }, { onConflict: 'user_id' });
-
-        if (error) {
-          console.log('❌ خطا در ذخیره اطلاعات بن:', error);
-        }
-        
-        return true;
-      } catch (banError) {
-        console.log('❌ خطا در بن کردن کاربر:', banError.message);
-        return false;
-      }
+    if (!MAIN_GROUP_ID) {
+      console.log('❌ گروه اصلی تنظیم نشده');
+      return false;
     }
-    
-    return false;
+
+    try {
+      // بن کردن کاربر از گروه اصلی
+      await bot.telegram.banChatMember(MAIN_GROUP_ID, userId);
+      console.log(`✅ کاربر ${firstName} از گروه اصلی بن شد`);
+      
+      // حذف کاربر از جدول اعضا
+      const { error: deleteError } = await supabase
+        .from('aklis_members')
+        .delete()
+        .eq('user_id', userId);
+
+      if (deleteError) {
+        console.log('❌ خطا در حذف کاربر از دیتابیس:', deleteError);
+      }
+      
+      // ذخیره در جدول بن شده‌ها
+      const { error } = await supabase
+        .from('aklis_banned')
+        .upsert({
+          user_id: userId,
+          username: username || '',
+          first_name: firstName || 'ناشناس',
+          banned_at: new Date().toISOString(),
+          banned_by: OWNER_ID
+        }, { onConflict: 'user_id' });
+
+      if (error) {
+        console.log('❌ خطا در ذخیره اطلاعات بن:', error);
+      }
+      
+      return true;
+    } catch (banError) {
+      console.log('❌ خطا در بن کردن کاربر:', banError.message);
+      return false;
+    }
   } catch (error) {
-    console.log('❌ خطا در بن کردن کاربر از همه گروه‌ها:', error.message);
+    console.log('❌ خطا در بن کردن کاربر از گروه اصلی:', error.message);
     return false;
   }
 };
@@ -276,8 +304,7 @@ bot.command('ban', async (ctx) => {
     const resultMessage = `🚫 کاربر بن شد\n\n` +
       `👤 @${targetUsername}\n` +
       `📋 از تمام گروه‌های اکلیس بن شد\n` +
-      `🕒 ${timeString}\n\n` +
-      `ℹ️ این قابلیت کامل پیاده‌سازی شده است`;
+      `🕒 ${timeString}`;
 
     await ctx.reply(resultMessage);
     console.log(`✅ دستور ban برای @${targetUsername} اجرا شد`);
@@ -317,24 +344,13 @@ bot.command('checkmembers', async (ctx) => {
     message += `✅ اعضای وفادار: ${loyalUsers.length} نفر\n`;
     message += `⚠️ اعضای مشکوک: ${suspiciousUsers.length} نفر\n\n`;
 
-    // نمایش لیست اعضای وفادار
-    if (loyalUsers.length > 0) {
-      message += `👑 اعضای وفادار:\n`;
-      loyalUsers.slice(0, 10).forEach((user, index) => {
-        message += `${index + 1}. ${user.first_name} (@${user.username || 'ندارد'})\n`;
-      });
-      if (loyalUsers.length > 10) {
-        message += `... و ${loyalUsers.length - 10} نفر دیگر\n`;
-      }
-      message += `\n`;
-    }
-
     if (suspiciousUsers.length > 0) {
-      message += `❓ آیا این ${suspiciousUsers.length} عضو مشکوک رو از تمام گروه‌های اکلیس بن کنم؟`;
+      // پیام جدید طبق درخواست شما - FIXED
+      message += `آیا ${suspiciousUsers.length} اعضای مشکوک رو بکشم ؟`;
       
       const keyboard = Markup.inlineKeyboard([
-        [Markup.button.callback('✅ بله، همه رو بن کن', 'kill_suspicious')],
-        [Markup.button.callback('❌ خیر، نگه دار', 'dont_kill')]
+        [Markup.button.callback('✅ آره', 'kill_suspicious')],
+        [Markup.button.callback('❌ نه', 'dont_kill')]
       ]);
 
       await ctx.reply(message, keyboard);
@@ -587,7 +603,7 @@ bot.on('message', async (ctx) => {
 // ==================[ پردازش Callback ها - FIXED ]==================
 bot.action(/approve_(\d+)/, async (ctx) => {
   try {
-    // بررسی مالکیت - FIXED
+    // بررسی مالکیت
     if (!checkOwnerAccessCallback(ctx)) {
       console.log('🚫 دسترسی غیرمجاز برای تایید کاربر');
       await ctx.answerCbQuery('فقط آکی می‌تونه این کار رو بکنه', { show_alert: true });
@@ -617,7 +633,7 @@ bot.action(/approve_(\d+)/, async (ctx) => {
 
 bot.action(/reject_(\d+)/, async (ctx) => {
   try {
-    // بررسی مالکیت - FIXED
+    // بررسی مالکیت
     if (!checkOwnerAccessCallback(ctx)) {
       console.log('🚫 دسترسی غیرمجاز برای رد کاربر');
       await ctx.answerCbQuery('فقط آکی می‌تونه این کار رو بکنه', { show_alert: true });
@@ -649,7 +665,7 @@ bot.action(/reject_(\d+)/, async (ctx) => {
 
 bot.action('kill_suspicious', async (ctx) => {
   try {
-    // بررسی مالکیت - FIXED
+    // بررسی مالکیت
     if (!checkOwnerAccessCallback(ctx)) {
       console.log('🚫 دسترسی غیرمجاز برای بن کردن');
       await ctx.answerCbQuery('فقط آکی می‌تونه این کار رو بکنه', { show_alert: true });
@@ -670,27 +686,31 @@ bot.action('kill_suspicious', async (ctx) => {
     let bannedCount = 0;
     let failedCount = 0;
     
-    // بن کردن کاربران مشکوک - FIXED
+    // بن کردن واقعی کاربران مشکوک - FIXED
     for (const user of suspiciousUsers) {
-      const success = await banUserFromAllGroups(user.user_id, user.username, user.first_name);
+      console.log(`🔫 در حال بن کردن کاربر: ${user.first_name} (${user.user_id})`);
+      
+      const success = await banUserFromMainGroup(user.user_id, user.username, user.first_name);
       if (success) {
         bannedCount++;
+        console.log(`✅ کاربر ${user.first_name} با موفقیت بن شد`);
       } else {
         failedCount++;
+        console.log(`❌ خطا در بن کردن کاربر ${user.first_name}`);
       }
       
       // تاخیر بین بن کردن کاربران برای جلوگیری از محدودیت تلگرام
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
     
-    // نمایش نتیجه - FIXED
+    // نمایش نتیجه واقعی - FIXED
     let resultMessage = `✅ عملیات بن کامل شد\n\n`;
     resultMessage += `🔫 بن شده: ${bannedCount} کاربر\n`;
     resultMessage += `❌ خطا در بن: ${failedCount} کاربر\n`;
     resultMessage += `📋 تعداد کل کاربران مشکوک: ${suspiciousUsers.length} نفر\n\n`;
     
     if (bannedCount > 0) {
-      resultMessage += `🎯 کاربران مشکوک با موفقیت از گروه‌های اکلیس حذف شدند`;
+      resultMessage += `🎯 ${bannedCount} کاربر مشکوک با موفقیت از گروه اصلی حذف شدند`;
     } else {
       resultMessage += `⚠️ هیچ کاربری بن نشد`;
     }
@@ -706,7 +726,7 @@ bot.action('kill_suspicious', async (ctx) => {
 
 bot.action('dont_kill', async (ctx) => {
   try {
-    // بررسی مالکیت - FIXED
+    // بررسی مالکیت
     if (!checkOwnerAccessCallback(ctx)) {
       console.log('🚫 دسترسی غیرمجاز');
       await ctx.answerCbQuery('فقط آکی می‌تونه این کار رو بکنه', { show_alert: true });
