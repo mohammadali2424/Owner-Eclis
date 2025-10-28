@@ -91,20 +91,26 @@ const checkOwnerAccessCallback = (ctx) => {
   return userId === OWNER_ID;
 };
 
-// ==================[ بررسی نمادهای وفاداری - ONLY 4 SYMBOLS ]==================
+// ==================[ بررسی نمادهای وفاداری - FIXED ]==================
 const checkLoyaltySymbols = (text) => {
-  if (!text) return false;
+  if (!text) {
+    console.log('📝 متن برای بررسی نماد خالی است');
+    return false;
+  }
   
   // فقط 4 نماد اصلی که گفتید
   const symbols = ['꩘', '𖢻', 'ꑭ', '𖮌'];
   
+  console.log(`🔍 بررسی نماد در متن: "${text}"`);
+  
   for (const symbol of symbols) {
     if (String(text).includes(symbol)) {
-      console.log(`✅ نماد "${symbol}" پیدا شد`);
+      console.log(`✅ نماد "${symbol}" در متن "${text}" پیدا شد`);
       return true;
     }
   }
   
+  console.log(`❌ هیچ نمادی در متن "${text}" پیدا نشد`);
   return false;
 };
 
@@ -178,15 +184,16 @@ const getActiveSubgroups = async () => {
   }
 };
 
-// ==================[ ذخیره کاربر تایید شده ]==================
+// ==================[ ذخیره کاربر تایید شده - FIXED ]==================
 const saveVerifiedUser = async (userId, username, firstName, verifiedBy) => {
   try {
     console.log(`💾 ذخیره کاربر تایید شده ${userId}...`);
+    console.log(`📝 اطلاعات کاربر: نام: "${firstName}", کاربری: "${username}"`);
     
-    // بررسی نماد وفاداری با 4 نماد اصلی
+    // بررسی نماد وفاداری با 4 نماد اصلی - بررسی دقیق‌تر
     const hasSymbol = checkLoyaltySymbols(firstName) || checkLoyaltySymbols(username);
 
-    console.log(`🔍 بررسی نماد برای ${firstName} (@${username}): ${hasSymbol}`);
+    console.log(`🔍 نتیجه بررسی نماد برای ${firstName} (@${username}): ${hasSymbol}`);
 
     const { error } = await supabase
       .from('aklis_members')
@@ -245,6 +252,7 @@ const getSuspiciousUsers = async () => {
       return [];
     }
 
+    console.log(`📊 تعداد کاربران مشکوک: ${data?.length || 0}`);
     return data || [];
   } catch (error) {
     console.log('❌ خطا در دریافت کاربران مشکوک:', error.message);
@@ -255,7 +263,7 @@ const getSuspiciousUsers = async () => {
 // ==================[ بن کردن کاربر از کل اکوسیستم ]==================
 const banUserFromEcosystem = async (userId, username, firstName) => {
   try {
-    console.log(`🔫 بن کردن کاربر ${userId} از کل اکوسیست��`);
+    console.log(`🔫 بن کردن کاربر ${userId} از کل اکوسیستم`);
     
     let totalBanned = 0;
     let totalFailed = 0;
@@ -297,7 +305,7 @@ const banUserFromEcosystem = async (userId, username, firstName) => {
       .eq('user_id', userId);
 
     if (deleteError) {
-      console.log('❌ خطا در حذف ک��ربر از دیتابیس:', deleteError);
+      console.log('❌ خطا در حذف کاربر از دیتابیس:', deleteError);
     }
     
     // ذخیره در جدول بن شده‌ها
@@ -337,7 +345,7 @@ bot.start((ctx) => {
     return ctx.reply(access.message);
   }
   
-  console.log('✅ دسترسی مالک ��أیید شد');
+  console.log('✅ دسترسی مالک تأیید شد');
   
   const replyText = `🥷🏻 نینجای اکلیس در خدمت شماست\n\n` +
     `🔹 /ban [آیدی] - بن کردن کاربر\n` +
@@ -427,8 +435,12 @@ bot.command('checkmembers', async (ctx) => {
       return ctx.reply('❌ خطا در دریافت اطلاعات اعضا از دیتابیس.');
     }
 
+    console.log(`📊 تعداد کل اعضا از دیتابیس: ${members?.length || 0}`);
+    
     const loyalUsers = members?.filter(m => m.has_symbol) || [];
     const suspiciousUsers = members?.filter(m => !m.has_symbol) || [];
+
+    console.log(`📊 وفادار: ${loyalUsers.length}, مشکوک: ${suspiciousUsers.length}`);
 
     let message = `🏰 بررسی اعضای اکلیس در کل اکوسیستم\n\n`;
     message += `✅ اعضای وفادار: ${loyalUsers.length} نفر\n`;
@@ -567,7 +579,7 @@ bot.on('message', async (ctx) => {
           // بررسی مالکیت
           if (addedBy !== OWNER_ID) {
             console.log(`🚫 کاربر ${addedBy} مالک نیست - لفت دادن`);
-            await ctx.reply('فقط آکی حق داره منو به گروه اضافه ک��ه');
+            await ctx.reply('فقط آکی حق داره منو به گروه اضافه کنه');
             
             try {
               await ctx.leaveChat();
