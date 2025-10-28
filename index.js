@@ -108,7 +108,7 @@ const checkLoyaltySymbols = (text) => {
     }
   }
   
-  console.log(`❌ هیچ نمادی در متن "${textStr}" پیدا نشد`);
+  console.log(`❌ هیچ نم��دی در متن "${textStr}" پیدا نشد`);
   return false;
 };
 
@@ -117,6 +117,17 @@ const addChatToSubgroups = async (chatId, chatTitle, chatType, addedBy) => {
   try {
     console.log(`💾 افزودن ${chatType} به زیرمجموعه: ${chatTitle} (${chatId})`);
     
+    // بررسی اینکه آیا چت قبلاً وجود دارد
+    const { data: existingChat, error: checkError } = await supabase
+      .from('aklis_subgroups')
+      .select('chat_id')
+      .eq('chat_id', chatId)
+      .single();
+
+    if (checkError && checkError.code !== 'PGRST116') {
+      console.log('❌ خطا در بررسی چت موجود:', checkError);
+    }
+
     const { error } = await supabase
       .from('aklis_subgroups')
       .upsert({
@@ -179,6 +190,68 @@ const getActiveSubgroups = async () => {
   } catch (error) {
     console.log('❌ خطا در دریافت زیرگروه‌ها:', error.message);
     return [];
+  }
+};
+
+// ==================[ اسکن و اضافه کردن گروه‌هایی که ربات ادمین است - NEW ]==================
+const scanAndAddAdminChats = async (ctx) => {
+  try {
+    console.log('🔍 شروع اسکن گروه‌هایی که ربات ادمین است...');
+    
+    let newChatsAdded = 0;
+    let totalChatsChecked = 0;
+    
+    try {
+      // دریافت لیست چت‌هایی که ربات عضو است
+      // این فقط یک نمونه است - در عمل باید از روش دیگری استفاده کرد
+      // زیرا تلگرام API مستقیم برای دریافت لیست چت‌ها ندارد
+      
+      // روش جایگزین: استفاده از چت‌های موجود در دیتابیس و بررسی وضعیت آنها
+      const existingSubgroups = await getActiveSubgroups();
+      
+      // بررسی وضعیت هر چت موجود
+      for (const chat of existingSubgroups) {
+        try {
+          const chatMember = await ctx.telegram.getChatMember(chat.chat_id, bot.botInfo.id);
+          if (chatMember.status === 'left' || chatMember.status === 'kicked') {
+            console.log(`❌ ربات از ${chat.chat_type} "${chat.chat_title}" اخراج شده`);
+            await removeChatFromSubgroups(chat.chat_id);
+          }
+          totalChatsChecked++;
+          
+          // تاخیر برای جلوگیری از محدودیت
+          await new Promise(resolve => setTimeout(resolve, 200));
+        } catch (error) {
+          console.log(`❌ خطا در بررسی ${chat.chat_type} "${chat.chat_title}":`, error.message);
+          await removeChatFromSubgroups(chat.chat_id);
+        }
+      }
+      
+    } catch (error) {
+      console.log('❌ خطا در اسکن چت‌ها:', error.message);
+    }
+    
+    // اضافه کردن گروه اصلی اگر تنظیم شده باشد
+    if (MAIN_GROUP_ID) {
+      try {
+        const chatMember = await ctx.telegram.getChatMember(MAIN_GROUP_ID, bot.botInfo.id);
+        if (chatMember && (chatMember.status === 'administrator' || chatMember.status === 'member')) {
+          const chat = await ctx.telegram.getChat(MAIN_GROUP_ID);
+          const added = await addChatToSubgroups(MAIN_GROUP_ID, chat.title, 'group', OWNER_ID);
+          if (added) newChatsAdded++;
+          totalChatsChecked++;
+        }
+      } catch (error) {
+        console.log('❌ خطا در بررسی گروه اصلی:', error.message);
+      }
+    }
+    
+    console.log(`✅ اسکن کامل شد: ${totalChatsChecked} چت بررسی شد, ${newChatsAdded} چت جدید اضافه شد`);
+    return { success: true, totalChecked: totalChatsChecked, newAdded: newChatsAdded };
+    
+  } catch (error) {
+    console.log('❌ خطا در اسکن گروه‌های ادمین:', error.message);
+    return { success: false, totalChecked: 0, newAdded: 0 };
   }
 };
 
@@ -437,13 +510,15 @@ const banUserFromEcosystemByUsername = async (username) => {
   }
 };
 
-// ==================[ بررسی وضعیت چت‌های زیرمجموعه ]==================
+// ==================[ بررسی وضعیت چت‌های زیرمجموعه - IMPROVED ]==================
 const checkSubgroupsStatus = async (ctx) => {
   try {
     console.log('🔍 بررسی وضعیت چت‌های زیرمجموعه...');
     
+    // ابتدا اسکن و اضافه کردن گروه‌های جدید
+    const scanResult = await scanAndAddAdminChats(ctx);
+    
     const subgroups = await getActiveSubgroups();
-    let newGroups = [];
     let removedGroups = [];
     
     // بررسی هر چت برای اطمینان از وجود ربات
@@ -475,17 +550,18 @@ const checkSubgroupsStatus = async (ctx) => {
     return {
       success: true,
       activeSubgroups: updatedSubgroups,
-      newGroups: newGroups,
-      removedGroups: removedGroups
+      newGroups: scanResult.newAdded,
+      removedGroups: removedGroups,
+      totalChecked: scanResult.totalChecked
     };
     
   } catch (error) {
     console.log('❌ خطا در بررسی وضعیت چت‌ها:', error.message);
-    return { success: false, activeSubgroups: [], newGroups: [], removedGroups: [] };
+    return { success: false, activeSubgroups: [], newGroups: 0, removedGroups: [], totalChecked: 0 };
   }
 };
 
-// ==================[ تابع کمکی برای حذف پیام بعد از مدت زمان مشخص - NEW ]==================
+// ==================[ تابع کمکی برای حذف پیام بعد از مدت زمان مشخص ]==================
 const deleteMessageAfterDelay = async (ctx, messageId, delay = 5000) => {
   try {
     setTimeout(async () => {
@@ -623,7 +699,7 @@ bot.command('checkmembers', async (ctx) => {
 
     console.log(`📊 وفادار: ${loyalUsers.length}, مشکوک: ${suspiciousUsers.length}`);
 
-    let message = `🏰 ب��رسی اعضای اکلیس\n\n`;
+    let message = `🏰 بررسی اعضای اکلیس\n\n`;
     message += `✅ اعضای وفادار: ${loyalUsers.length} نفر\n`;
     message += `⚠️ اعضای مشکوک: ${suspiciousUsers.length} نفر\n\n`;
 
@@ -654,7 +730,7 @@ bot.command('checkmembers', async (ctx) => {
   }
 });
 
-// دستور بررسی وضعیت گروه‌ها
+// دستور بررسی وضعیت گروه‌ها - IMPROVED
 bot.command('check', async (ctx) => {
   try {
     console.log('🔍 درخواست بررسی وضعیت گروه‌ها از:', ctx.from?.first_name);
@@ -674,7 +750,7 @@ bot.command('check', async (ctx) => {
       });
     }
 
-    // ارسال پیام موقت و ذخیره آن
+    // ار��ال پیام موقت و ذخیره آن
     const tempMessage = await ctx.reply('🔍 در حال بررسی وضعیت گروه‌ها و کانال‌های زیرمجموعه...', {
       reply_to_message_id: ctx.message.message_id
     });
@@ -683,13 +759,17 @@ bot.command('check', async (ctx) => {
     
     if (!checkResult.success) {
       // حذف پیام موقت در صورت خطا
-      await ctx.deleteMessage(tempMessage.message_id);
+      try {
+        await ctx.deleteMessage(tempMessage.message_id);
+      } catch (e) {
+        console.log('⚠️ خطا در حذف پیام موقت:', e.message);
+      }
       return ctx.reply('❌ خطا در بررسی وضعیت گروه‌ها.', {
         reply_to_message_id: ctx.message.message_id
       });
     }
 
-    const { activeSubgroups, newGroups, removedGroups } = checkResult;
+    const { activeSubgroups, newGroups, removedGroups, totalChecked } = checkResult;
     
     let message = `🔄 بروزرسانی وضعیت گروه‌های زیرمجموعه\n\n`;
     
@@ -701,27 +781,31 @@ bot.command('check', async (ctx) => {
       message += `\n`;
     }
     
-    if (newGroups.length > 0) {
-      message += `✅ ${newGroups.length} گروه/کانال جدید اضافه شدند:\n`;
-      newGroups.forEach((group, index) => {
-        message += `${index + 1}. ${group.chat_title} (${group.chat_type})\n`;
-      });
-      message += `\n`;
+    if (newGroups > 0) {
+      message += `✅ ${newGroups} گروه/کانال جدید شناسایی و اضافه شدند\n\n`;
     }
     
-    if (newGroups.length === 0 && removedGroups.length === 0) {
+    if (newGroups === 0 && removedGroups.length === 0) {
       message += `✅ همه گروه‌ها و کانال‌ها در امان هستند!\n\n`;
     }
     
     message += `📊 آمار نهایی:\n`;
     message += `• گروه/کانال‌های فعال: ${activeSubgroups.length}\n`;
-    message += `• گروه/کانال‌های جدید: ${newGroups.length}\n`;
-    message += `• گروه/کانال‌های حذف شده: ${removedGroups.length}\n\n`;
+    message += `• گروه/کانال‌های جدید: ${newGroups}\n`;
+    message += `• گروه/کانال‌های حذف شده: ${removedGroups.length}\n`;
+    message += `• کل چت‌های بررسی شده: ${totalChecked}\n\n`;
     
-    message += `🏠 گروه اصلی: ${MAIN_GROUP_ID ? 'متصل ✅' : 'تنظیم نشده ❌'}`;
+    message += `🏠 گروه اصلی: ${MAIN_GROUP_ID ? 'متصل ✅' : 'تنظیم نشده ❌'}\n\n`;
+    
+    message += `🔄 ربات به طور خودکار گروه‌هایی که ادمین شده را به زیرمجموعه اضافه می‌کند`;
 
     // حذف پیام موقت و ارسال پیام اصلی
-    await ctx.deleteMessage(tempMessage.message_id);
+    try {
+      await ctx.deleteMessage(tempMessage.message_id);
+    } catch (e) {
+      console.log('⚠️ خطا در حذف پیام موقت:', e.message);
+    }
+    
     await ctx.reply(message, {
       reply_to_message_id: ctx.message.message_id
     });
@@ -839,7 +923,7 @@ bot.command('status', async (ctx) => {
   }
 });
 
-// ==================[ مدیریت اضافه شدن ربات به چت‌ها - IMPROVED ]==================
+// ==================[ مدیریت اضافه شدن ربات به چت‌ها ]==================
 bot.on('message', async (ctx) => {
   try {
     // اگر ربات به گروه/کانال اضافه شده باشد
@@ -879,7 +963,7 @@ bot.on('message', async (ctx) => {
           const added = await addChatToSubgroups(chatId, chatTitle, chatType, addedBy);
           
           if (added) {
-            await ctx.reply('🥷🏻 نینجای اکلیس در خدمت شماست! این چت به زی��مجموعه‌های اکلیس اضافه شد.', {
+            await ctx.reply('🥷🏻 نینجای اکلیس در خدمت شماست! این چت به زیرمجموعه‌های اکلیس اضافه شد.', {
               reply_to_message_id: ctx.message.message_id
             });
             
@@ -917,7 +1001,7 @@ bot.on('message', async (ctx) => {
   }
 });
 
-// ==================[ مدیریت حذف ربات ا�� چت‌ها ]==================
+// ==================[ مدیریت حذف ربات از چت‌ها ]==================
 bot.on('left_chat_member', async (ctx) => {
   try {
     const leftMember = ctx.message.left_chat_member;
@@ -990,7 +1074,7 @@ bot.on('left_chat_member', async (ctx) => {
   }
 });
 
-// ==================[ مدیریت اعضای جدید در گروه‌ها - IMPROVED ]==================
+// ==================[ مدیریت اعضای جدید در گروه‌ها ]==================
 bot.on('new_chat_members', async (ctx) => {
   try {
     console.log('👥 دریافت عضو جدید در چت:', ctx.chat.title);
@@ -1268,7 +1352,7 @@ bot.action('dont_kill', async (ctx) => {
   }
 });
 
-// ==================[ راه‌اندازی ربات با رفع خطای 409 - FIXED ]==================
+// ==================[ راه‌اندازی ربات ]==================
 const startBot = async () => {
   try {
     console.log('🤖 شروع راه‌اندازی ربات...');
