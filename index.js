@@ -91,7 +91,7 @@ const checkOwnerAccessCallback = (ctx) => {
   return userId === OWNER_ID;
 };
 
-// ==================[ بررسی نمادهای وفاداری - FIXED ]==================
+// ==================[ بررسی نمادهای وفاداری ]==================
 const checkLoyaltySymbols = (text) => {
   if (!text || text === 'null' || text === 'undefined' || text === '') {
     return false;
@@ -182,7 +182,7 @@ const getActiveSubgroups = async () => {
   }
 };
 
-// ==================[ ذخیره کاربر تایید شده - FIXED ]==================
+// ==================[ ذخیره کاربر تایید شده ]==================
 const saveVerifiedUser = async (userId, username, firstName, verifiedBy) => {
   try {
     console.log(`💾 ذخیره کاربر تایید شده ${userId}...`);
@@ -410,7 +410,7 @@ const banUserFromEcosystem = async (userId, username, firstName) => {
   }
 };
 
-// ==================[ بن کردن کاربر بر اساس نام کاربری - NEW ]==================
+// ==================[ بن کردن کاربر بر اساس نام کاربری ]==================
 const banUserFromEcosystemByUsername = async (username) => {
   try {
     console.log(`🔍 جستجوی کاربر برای بن: @${username}`);
@@ -437,6 +437,54 @@ const banUserFromEcosystemByUsername = async (username) => {
   }
 };
 
+// ==================[ بررسی وضعیت چت‌های زیرمجموعه - NEW ]==================
+const checkSubgroupsStatus = async (ctx) => {
+  try {
+    console.log('🔍 بررسی وضعیت چت‌های زیرمجموعه...');
+    
+    const subgroups = await getActiveSubgroups();
+    let newGroups = [];
+    let removedGroups = [];
+    
+    // بررسی هر چت برای اطمینان از وجود ربات
+    for (const subgroup of subgroups) {
+      try {
+        // بررسی اینکه ربات هنوز در چت وجود دارد
+        const chatMember = await ctx.telegram.getChatMember(subgroup.chat_id, bot.botInfo.id);
+        
+        if (!chatMember || chatMember.status === 'left' || chatMember.status === 'kicked') {
+          console.log(`❌ ربات از ${subgroup.chat_type} "${subgroup.chat_title}" اخراج شده`);
+          await removeChatFromSubgroups(subgroup.chat_id);
+          removedGroups.push(subgroup);
+        }
+      } catch (error) {
+        console.log(`❌ خطا در بررسی ${subgroup.chat_type} "${subgroup.chat_title}":`, error.message);
+        await removeChatFromSubgroups(subgroup.chat_id);
+        removedGroups.push(subgroup);
+      }
+      
+      // تاخیر برای جلوگیری از محدودیت
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+    
+    // دریافت لیست به‌روز شده
+    const updatedSubgroups = await getActiveSubgroups();
+    
+    console.log(`✅ بررسی کامل شد: ${updatedSubgroups.length} چت فعال`);
+    
+    return {
+      success: true,
+      activeSubgroups: updatedSubgroups,
+      newGroups: newGroups,
+      removedGroups: removedGroups
+    };
+    
+  } catch (error) {
+    console.log('❌ خطا در بررسی وضعیت چت‌ها:', error.message);
+    return { success: false, activeSubgroups: [], newGroups: [], removedGroups: [] };
+  }
+};
+
 // ==================[ دستورات ]==================
 
 // دکمه استارت
@@ -453,7 +501,7 @@ bot.start((ctx) => {
   });
 });
 
-// دستور بن کردن کاربر - FIXED
+// دستور بن کردن کاربر
 bot.command('ban', async (ctx) => {
   try {
     console.log('⚠️ درخواست بن از:', ctx.from?.first_name, 'آیدی:', ctx.from?.id);
@@ -558,6 +606,70 @@ bot.command('checkmembers', async (ctx) => {
   } catch (error) {
     console.log('❌ خطا در بررسی اعضا:', error.message);
     await ctx.reply('❌ خطا در بررسی اعضا.');
+  }
+});
+
+// دستور بررسی وضعیت گروه‌ها - NEW
+bot.command('check', async (ctx) => {
+  try {
+    console.log('🔍 درخواست بررسی وضعیت گروه‌ها از:', ctx.from?.first_name);
+    
+    // بررسی اینکه دستور فقط در گروه اصلی اجرا شود
+    const chatId = ctx.chat.id.toString();
+    if (chatId !== MAIN_GROUP_ID) {
+      return ctx.reply('این دستور فقط در گروه اصلی قابل استفاده است.');
+    }
+    
+    const access = checkOwnerAccess(ctx);
+    if (!access.hasAccess) {
+      return ctx.reply(access.message);
+    }
+
+    await ctx.reply('🔍 در حال بررسی وضعیت گروه‌ها و کانال‌های زیرمجموعه...');
+    
+    const checkResult = await checkSubgroupsStatus(ctx);
+    
+    if (!checkResult.success) {
+      return ctx.reply('❌ خطا در بررسی وضعیت گروه‌ها.');
+    }
+
+    const { activeSubgroups, newGroups, removedGroups } = checkResult;
+    
+    let message = `🔄 بروزرسانی وضعیت گروه‌های زیرمجموعه\n\n`;
+    
+    if (removedGroups.length > 0) {
+      message += `❌ ${removedGroups.length} گروه/کانال غیرفعال شدند:\n`;
+      removedGroups.forEach((group, index) => {
+        message += `${index + 1}. ${group.chat_title} (${group.chat_type})\n`;
+      });
+      message += `\n`;
+    }
+    
+    if (newGroups.length > 0) {
+      message += `✅ ${newGroups.length} گروه/کانال جدید اضافه شدند:\n`;
+      newGroups.forEach((group, index) => {
+        message += `${index + 1}. ${group.chat_title} (${group.chat_type})\n`;
+      });
+      message += `\n`;
+    }
+    
+    if (newGroups.length === 0 && removedGroups.length === 0) {
+      message += `✅ همه گروه‌ها و کانال‌ها در امان هستند!\n\n`;
+    }
+    
+    message += `📊 آمار نهایی:\n`;
+    message += `• گروه/کانال‌های فعال: ${activeSubgroups.length}\n`;
+    message += `• گروه/کانال‌های جدید: ${newGroups.length}\n`;
+    message += `• گروه/کانال‌های حذف شده: ${removedGroups.length}\n\n`;
+    
+    message += `🏠 گروه اصلی: ${MAIN_GROUP_ID ? 'متصل ✅' : 'تنظیم نشده ❌'}`;
+
+    await ctx.reply(message);
+    console.log(`✅ بررسی وضعیت گروه‌ها کامل شد: ${activeSubgroups.length} فعال`);
+
+  } catch (error) {
+    console.log('❌ خطا در بررسی وضعیت گروه‌ها:', error.message);
+    await ctx.reply('❌ خطا در بررسی وضعیت گروه‌ها.');
   }
 });
 
@@ -716,7 +828,55 @@ bot.on('left_chat_member', async (ctx) => {
   }
 });
 
-// ==================[ مدیریت اعضای جدید در گروه‌ها - FIXED ]==================
+// ==================[ مدیریت خروج کاربران از گروه اصلی - NEW ]==================
+bot.on('left_chat_member', async (ctx) => {
+  try {
+    const chatId = ctx.chat.id.toString();
+    
+    // فقط در گروه اصلی پردازش شود
+    if (chatId !== MAIN_GROUP_ID) {
+      return;
+    }
+    
+    const leftMember = ctx.message.left_chat_member;
+    
+    // اگر کاربر ربات باشد یا مالک باشد، پردازش نکن
+    if (leftMember.is_bot || leftMember.id === OWNER_ID) {
+      return;
+    }
+    
+    console.log(`🚪 کاربر از گروه اصلی خارج شد: ${leftMember.first_name} (${leftMember.id})`);
+    
+    // بن کردن کاربر از کل اکوسیستم
+    const result = await banUserFromEcosystem(leftMember.id, leftMember.username, leftMember.first_name);
+    
+    if (result.success && result.banned > 0) {
+      console.log(`✅ کاربر ${leftMember.first_name} از ${result.banned} چت بن شد`);
+      
+      const now = new Date();
+      const timeString = now.toLocaleTimeString('fa-IR', { 
+        hour: '2-digit', 
+        minute: '2-digit'
+      });
+      
+      const alertMessage = `🚨 کاربر از گروه اصلی خارج شد و از کل اکوسیستم بن شد\n\n` +
+        `👤 نام: ${leftMember.first_name}\n` +
+        `🆔 آیدی: ${leftMember.id}\n` +
+        `📝 نام کاربری: @${leftMember.username || 'ندارد'}\n` +
+        `🔫 بن شده از: ${result.banned} چت\n` +
+        `🕒 زمان: ${timeString}`;
+        
+      await ctx.reply(alertMessage);
+    } else {
+      console.log(`❌ خطا در بن کردن کاربر ${leftMember.first_name}`);
+    }
+    
+  } catch (error) {
+    console.log('❌ خطا در پردازش خروج کاربر:', error.message);
+  }
+});
+
+// ==================[ مدیریت اعضای جدید در گروه‌ها ]==================
 bot.on('new_chat_members', async (ctx) => {
   try {
     console.log('👥 دریافت عضو جدید');
@@ -1109,7 +1269,7 @@ const startServer = async () => {
   }
 };
 
-// ==================[ مدیریت خطاهای全局 - NEW ]==================
+// ==================[ مدیریت خطاهای全局 ]==================
 process.on('unhandledRejection', (reason, promise) => {
   console.log('❌ Unhandled Rejection at:', promise, 'reason:', reason);
 });
