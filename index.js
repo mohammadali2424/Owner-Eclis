@@ -91,38 +91,24 @@ const checkOwnerAccessCallback = (ctx) => {
   return userId === OWNER_ID;
 };
 
-// ==================[ بررسی نمادهای وفاداری - COMPLETELY REWRITTEN ]==================
+// ==================[ بررسی نمادهای وفاداری - FIXED ]==================
 const checkLoyaltySymbols = (text) => {
   if (!text || text === 'null' || text === 'undefined' || text === '') {
-    console.log('📝 متن برای بررسی نماد خالی یا نامعتبر است');
     return false;
   }
   
-  // نمادهای اصلی
   const symbols = ['꩘', '𖢻', 'ꑭ', '𖮌'];
-  
   const textStr = String(text);
-  console.log(`🔍 بررسی نماد در متن: "${textStr}" (طول: ${textStr.length})`);
-  console.log(`🔍 کدهای کاراکتر:`, Array.from(textStr).map(char => char.charCodeAt(0).toString(16)));
   
-  // بررسی دقیق هر کاراکتر
-  for (let i = 0; i < textStr.length; i++) {
-    const char = textStr[i];
-    const charCode = char.charCodeAt(0).toString(16);
-    
-    for (const symbol of symbols) {
-      const symbolCode = symbol.charCodeAt(0).toString(16);
-      
-      if (char === symbol) {
-        console.log(`✅ نماد "${char}" (کد: ${charCode}) در موقعیت ${i} پیدا شد`);
-        console.log(`✅ نماد مورد انتظار "${symbol}" (کد: ${symbolCode})`);
-        return true;
-      }
+  // بررسی مستقیم وجود نمادها
+  for (const symbol of symbols) {
+    if (textStr.includes(symbol)) {
+      console.log(`✅ نماد "${symbol}" در متن پیدا شد`);
+      return true;
     }
   }
   
   console.log(`❌ هیچ نمادی در متن "${textStr}" پیدا نشد`);
-  console.log(`🔍 نمادهای مورد انتظار:`, symbols);
   return false;
 };
 
@@ -196,11 +182,10 @@ const getActiveSubgroups = async () => {
   }
 };
 
-// ==================[ ذخیره کاربر تایید شده ]==================
+// ==================[ ذخیره کاربر تایید شده - FIXED ]==================
 const saveVerifiedUser = async (userId, username, firstName, verifiedBy) => {
   try {
     console.log(`💾 ذخیره کاربر تایید شده ${userId}...`);
-    console.log(`📝 اطلاعات کاربر: نام: "${firstName}", کاربری: "${username}"`);
     
     // بررسی نماد وفاداری
     const hasSymbol = checkLoyaltySymbols(firstName) || checkLoyaltySymbols(username);
@@ -301,7 +286,6 @@ const scanAndSaveAllMembers = async (ctx) => {
         console.log(`❌ خطا در ذخیره کاربر ${member.first_name}:`, error);
       } else {
         savedCount++;
-        console.log(`✅ کاربر ${member.first_name} ذخیره شد - نماد: ${hasSymbol}`);
       }
       
       // تاخیر برای جلوگیری از محدودیت
@@ -320,17 +304,13 @@ const scanAndSaveAllMembers = async (ctx) => {
 // ==================[ بررسی تایید کاربر ]==================
 const isUserVerified = async (userId) => {
   try {
-    console.log(`🔍 بررسی تایید کاربر ${userId}...`);
-    
     const { data, error } = await supabase
       .from('aklis_members')
       .select('user_id')
       .eq('user_id', userId)
       .single();
 
-    const isVerified = !error && data;
-    console.log(`📊 کاربر ${userId} تایید شده: ${isVerified}`);
-    return isVerified;
+    return !error && data;
   } catch (error) {
     console.log('❌ خطا در بررسی تایید کاربر:', error.message);
     return false;
@@ -350,10 +330,9 @@ const getSuspiciousUsers = async () => {
       return [];
     }
 
-    console.log(`📊 تعداد کاربران مشکوک: ${data?.length || 0}`);
     return data || [];
   } catch (error) {
-    console.log('❌ خطا در در��افت کاربران مشکوک:', error.message);
+    console.log('❌ خطا در دریافت کاربران مشکوک:', error.message);
     return [];
   }
 };
@@ -431,61 +410,88 @@ const banUserFromEcosystem = async (userId, username, firstName) => {
   }
 };
 
+// ==================[ بن کردن کاربر بر اساس نام کاربری - NEW ]==================
+const banUserFromEcosystemByUsername = async (username) => {
+  try {
+    console.log(`🔍 جستجوی کاربر برای بن: @${username}`);
+    
+    // ابتدا کاربر را از دیتابیس پیدا کن
+    const { data: user, error } = await supabase
+      .from('aklis_members')
+      .select('user_id, username, first_name')
+      .eq('username', username)
+      .single();
+
+    if (error || !user) {
+      console.log(`❌ کاربر @${username} در دیتابیس پیدا نشد`);
+      return { success: false, banned: 0, failed: 0 };
+    }
+
+    console.log(`✅ کاربر پیدا شد: ${user.first_name} (${user.user_id})`);
+    
+    // سپس کاربر را بن کن
+    return await banUserFromEcosystem(user.user_id, user.username, user.first_name);
+  } catch (error) {
+    console.log('❌ خطا در بن کردن با نام کاربری:', error.message);
+    return { success: false, banned: 0, failed: 0 };
+  }
+};
+
 // ==================[ دستورات ]==================
 
-// دکمه استارت - SIMPLIFIED
+// دکمه استارت
 bot.start((ctx) => {
   console.log('🎯 دستور استارت از:', ctx.from?.first_name, 'آیدی:', ctx.from?.id);
   
   const access = checkOwnerAccess(ctx);
   if (!access.hasAccess) {
-    console.log('🚫 دسترسی غیرمجاز');
     return ctx.reply(access.message);
   }
   
-  console.log('✅ دسترسی مالک تأیید شد');
-  
-  // فقط این پیام ساده - بدون دکمه و دستورات
   return ctx.reply('نینجای شماره چهار در خدمت شماست', {
     reply_to_message_id: ctx.message.message_id
   });
 });
 
-// دستور بن کردن کاربر
+// دستور بن کردن کاربر - FIXED
 bot.command('ban', async (ctx) => {
   try {
     console.log('⚠️ درخواست بن از:', ctx.from?.first_name, 'آیدی:', ctx.from?.id);
     
     const access = checkOwnerAccess(ctx);
     if (!access.hasAccess) {
-      console.log('🚫 دسترسی غیرمجاز برای بن');
       return ctx.reply(access.message);
     }
 
     const args = ctx.message.text.split(' ');
     if (args.length < 2) {
-      console.log('❌ دستور ban بدون آیدی');
-      return ctx.reply('❌ لطفاً آیدی کاربر را وارد کنید.\n\nمثال:\n<code>/ban @username</code>', { 
-        parse_mode: 'HTML' 
+      return ctx.reply('❌ لطفاً آیدی کاربر را وارد کنید.\n\nمثال:\n`/ban @username`', { 
+        parse_mode: 'Markdown' 
       });
     }
 
     const targetUsername = args[1].replace('@', '');
     console.log(`🎯 بن کاربر: @${targetUsername}`);
 
+    // بن کردن کاربر
+    const result = await banUserFromEcosystemByUsername(targetUsername);
+    
     const now = new Date();
     const timeString = now.toLocaleTimeString('fa-IR', { 
       hour: '2-digit', 
       minute: '2-digit'
     });
 
-    const resultMessage = `🚫 کاربر بن شد\n\n` +
-      `👤 @${targetUsername}\n` +
-      `📋 از تمام گروه‌های اکلیس بن شد\n` +
-      `🕒 ${timeString}`;
+    if (result.success && result.banned > 0) {
+      const resultMessage = `🚫 کاربر بن شد\n\n` +
+        `👤 @${targetUsername}\n` +
+        `📋 از ${result.banned} گروه بن شد\n` +
+        `🕒 ${timeString}`;
 
-    await ctx.reply(resultMessage);
-    console.log(`✅ دستور ban برای @${targetUsername} اجرا شد`);
+      await ctx.reply(resultMessage);
+    } else {
+      await ctx.reply(`❌ خطا در بن کردن کاربر @${targetUsername}\n\nکاربر ممکن است در دیتابیس وجود نداشته باشد.`);
+    }
 
   } catch (error) {
     console.log('❌ خطا در اجرای دستور ban:', error.message);
@@ -493,7 +499,7 @@ bot.command('ban', async (ctx) => {
   }
 });
 
-// دستور بررسی اعضای اکلیس - IMPROVED
+// دستور بررسی اعضای اکلیس
 bot.command('checkmembers', async (ctx) => {
   try {
     console.log('🔍 درخواست بررسی اعضا از:', ctx.from?.first_name);
@@ -501,13 +507,11 @@ bot.command('checkmembers', async (ctx) => {
     // بررسی اینکه دستور فقط در گروه اصلی اجرا شود
     const chatId = ctx.chat.id.toString();
     if (chatId !== MAIN_GROUP_ID) {
-      console.log('🚫 دستور checkmembers در گروه غیراصلی');
       return ctx.reply('این دستور فقط در گروه اصلی قابل استفاده است.');
     }
     
     const access = checkOwnerAccess(ctx);
     if (!access.hasAccess) {
-      console.log('🚫 دسترسی غیرمجاز برای بررسی اعضا');
       return ctx.reply(access.message);
     }
 
@@ -538,7 +542,6 @@ bot.command('checkmembers', async (ctx) => {
     message += `⚠️ اعضای مشکوک: ${suspiciousUsers.length} نفر\n\n`;
 
     if (suspiciousUsers.length > 0) {
-      // پیام جدید طبق درخواست
       message += `آیا ${suspiciousUsers.length} عضو مشکوک توی کل اکوسیستم اکلیس رو بکشم ؟`;
       
       const keyboard = Markup.inlineKeyboard([
@@ -565,7 +568,6 @@ bot.command('groups', async (ctx) => {
     
     const access = checkOwnerAccess(ctx);
     if (!access.hasAccess) {
-      console.log('🚫 دسترسی غیرمجاز برای لیست گروه‌ها');
       return ctx.reply(access.message);
     }
 
@@ -714,7 +716,7 @@ bot.on('left_chat_member', async (ctx) => {
   }
 });
 
-// ==================[ مدیریت اعضای جدید در گروه‌ها ]==================
+// ==================[ مدیریت اعضای جدید در گروه‌ها - FIXED ]==================
 bot.on('new_chat_members', async (ctx) => {
   try {
     console.log('👥 دریافت عضو جدید');
@@ -855,7 +857,6 @@ bot.action(/approve_(\d+)/, async (ctx) => {
   try {
     // بررسی مالکیت
     if (!checkOwnerAccessCallback(ctx)) {
-      console.log('🚫 دسترسی غیرمجاز برای تایید کاربر');
       await ctx.answerCbQuery('فقط آکی می‌تونه این کار رو بکنه', { show_alert: true });
       return;
     }
@@ -885,7 +886,6 @@ bot.action(/reject_(\d+)/, async (ctx) => {
   try {
     // بررسی مالکیت
     if (!checkOwnerAccessCallback(ctx)) {
-      console.log('🚫 دسترسی غیرمجاز برای رد کاربر');
       await ctx.answerCbQuery('فقط آکی می‌تونه این کار رو بکنه', { show_alert: true });
       return;
     }
@@ -917,7 +917,6 @@ bot.action('kill_suspicious', async (ctx) => {
   try {
     // بررسی مالکیت
     if (!checkOwnerAccessCallback(ctx)) {
-      console.log('🚫 دسترسی غیرمجاز برای بن کردن');
       await ctx.answerCbQuery('فقط آکی می‌تونه این کار رو بکنه', { show_alert: true });
       return;
     }
@@ -944,17 +943,15 @@ bot.action('kill_suspicious', async (ctx) => {
       if (result.success) {
         totalBanned += result.banned;
         totalFailed += result.failed;
-        console.log(`✅ کاربر ${user.first_name} با موفقیت از ${result.banned} چت بن شد`);
       } else {
         totalFailed++;
-        console.log(`❌ خطا در بن کردن کاربر ${user.first_name}`);
       }
       
       // تاخیر بین بن کردن کاربران برای جلوگیری از محدودیت تلگرام
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
     
-    // نمایش نتیجه جدید طبق درخواست
+    // نمایش نتیجه
     let resultMessage = `با نهایت خوشحالی و لذت همشون کشته شدن\n\n`;
     resultMessage += `🔫 تعداد کاربران مشکوک: ${suspiciousUsers.length} نفر\n`;
     resultMessage += `✅ بن موفق از ${totalBanned} چت\n`;
@@ -979,7 +976,6 @@ bot.action('dont_kill', async (ctx) => {
   try {
     // بررسی مالکیت
     if (!checkOwnerAccessCallback(ctx)) {
-      console.log('🚫 دسترسی غیرمجاز');
       await ctx.answerCbQuery('فقط آکی می‌تونه این کار رو بکنه', { show_alert: true });
       return;
     }
@@ -1113,14 +1109,15 @@ const startServer = async () => {
   }
 };
 
-// شروع برنامه
-startServer();
-
-// مدیریت خطاها
-process.on('unhandledRejection', (error) => {
-  console.log('❌ خطای catch نشده:', error.message);
+// ==================[ مدیریت خطاهای全局 - NEW ]==================
+process.on('unhandledRejection', (reason, promise) => {
+  console.log('❌ Unhandled Rejection at:', promise, 'reason:', reason);
 });
 
 process.on('uncaughtException', (error) => {
-  console.log('❌ خطای مدیریت نشده:', error);
+  console.log('❌ Uncaught Exception:', error);
+  process.exit(1);
 });
+
+// شروع برنامه
+startServer();
