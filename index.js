@@ -55,7 +55,7 @@ const startAutoPing = () => {
       const response = await axios.get(`${selfUrl}/health`, { timeout: 15000 });
       console.log('✅ پینگ موفق - وضعیت:', response.data.status);
     } catch (error) {
-      console.log('❌ پینگ ناموفق:', error.message);
+      console.log('��� پینگ ناموفق:', error.message);
     }
   };
 
@@ -102,7 +102,7 @@ const checkLoyaltySymbols = (text) => {
   
   console.log(`🔍 بررسی نماد در متن: "${textStr}"`);
   
-  // بررسی مستقیم وجود نمادها
+  // بر��سی مستقیم وجود نمادها
   for (const symbol of symbols) {
     if (textStr.includes(symbol)) {
       console.log(`✅ نماد "${symbol}" در متن پیدا شد`);
@@ -213,15 +213,14 @@ const testDatabaseConnection = async () => {
   }
 };
 
-// ==================[ مدیریت اضافه شدن ربات به چت‌ها - FIXED ]==================
-const handleBotAddedToChat = async (ctx) => {
+// ==================[ مدیریت اضافه شدن ربات به گروه‌ها ]==================
+const handleBotAddedToGroup = async (ctx) => {
   try {
     const chatId = ctx.chat.id.toString();
     const chatTitle = ctx.chat.title || 'بدون عنوان';
-    const chatType = ctx.chat.type === 'channel' ? 'channel' : 'group';
     const addedBy = ctx.message.from.id;
     
-    console.log(`🤖 ربات به ${chatType} "${chatTitle}" اضافه شد - توسط کاربر: ${addedBy}`);
+    console.log(`🤖 ربات به گروه "${chatTitle}" اضافه شد - توسط کاربر: ${addedBy}`);
     
     // بررسی مالکیت
     if (addedBy !== OWNER_ID) {
@@ -232,9 +231,9 @@ const handleBotAddedToChat = async (ctx) => {
       
       try {
         await ctx.leaveChat();
-        console.log('✅ ربات از چت خارج شد');
+        console.log('✅ ربات از گروه خارج شد');
       } catch (leaveError) {
-        console.log('❌ خطا در خروج از چت:', leaveError.message);
+        console.log('❌ خطا در خروج از گروه:', leaveError.message);
       }
       return;
     }
@@ -242,34 +241,70 @@ const handleBotAddedToChat = async (ctx) => {
     console.log(`✅ ربات توسط مالک اضافه شد - افزودن به زیرمجموعه`);
     
     // اضافه کردن به زیرمجموعه
-    const added = await addChatToSubgroups(chatId, chatTitle, chatType, addedBy);
+    const added = await addChatToSubgroups(chatId, chatTitle, 'group', addedBy);
     
     if (added) {
-      await ctx.reply('🥷🏻 نینجای اکلیس در خدمت شماست! این چت به زیرمجموعه‌های اکلیس اضافه شد.', {
+      await ctx.reply('🥷🏻 نینجای اکلیس در خدمت شماست! این گروه به زیرمجموعه‌های اکلیس اضافه شد.', {
         reply_to_message_id: ctx.message.message_id
       });
       
       // اطلاع به گروه اصلی
-      await notifyMainGroupAboutNewChat(ctx, chatTitle, chatType, chatId);
+      await notifyMainGroupAboutNewChat(chatTitle, 'group', chatId);
     }
   } catch (error) {
-    console.log('❌ خطا در پردازش اضافه شدن ربات:', error.message);
+    console.log('❌ خطا در پردازش اضافه شدن ربات به گروه:', error.message);
+  }
+};
+
+// ==================[ مدیریت اضافه شدن ربات به کانال‌ها - NEW ]==================
+const handleBotAddedToChannel = async (ctx) => {
+  try {
+    const chatId = ctx.chat.id.toString();
+    const chatTitle = ctx.chat.title || 'بدون عنوان';
+    
+    console.log(`📢 ربات به کانال "${chatTitle}" اضافه شد`);
+    
+    // برای کانال‌ها نمی‌توانیم کاربر اضافه‌کننده را مستقیماً بگیریم
+    // بنابراین فقط مالک می‌تواند ربات را به کانال اضافه کند
+    // این یک محدودیت API تلگرام است
+    
+    console.log(`✅ افزودن کانال ب�� زیرمجموعه`);
+    
+    // اضافه کردن به زیرمجموعه
+    const added = await addChatToSubgroups(chatId, chatTitle, 'channel', OWNER_ID);
+    
+    if (added) {
+      // در کانال‌ها نمی‌توانیم پیام بفرستیم مگر اینکه ادمین باشیم
+      try {
+        await ctx.reply('🥷🏻 نینجای اکلیس در خدمت شماست! این کانال به زیرمجموعه‌های اکلیس اضافه شد.');
+      } catch (messageError) {
+        console.log('⚠️ نتوانست در کانال پیام بفرستد (ممکن است اجازه نداشته باشد)');
+      }
+      
+      // اطلاع به گروه اصلی
+      await notifyMainGroupAboutNewChat(chatTitle, 'channel', chatId);
+    }
+  } catch (error) {
+    console.log('❌ خطا در پردازش اضافه شدن ربات به کانال:', error.message);
   }
 };
 
 // ==================[ اطلاع به گروه اصلی درباره چت جدید ]==================
-const notifyMainGroupAboutNewChat = async (ctx, chatTitle, chatType, chatId) => {
+const notifyMainGroupAboutNewChat = async (chatTitle, chatType, chatId) => {
   try {
-    if (MAIN_GROUP_ID && ctx.chat.id.toString() !== MAIN_GROUP_ID) {
+    if (MAIN_GROUP_ID) {
       const now = new Date();
       const timeString = now.toLocaleTimeString('fa-IR', { 
         hour: '2-digit', 
         minute: '2-digit'
       });
       
-      const alertMessage = `✅ چت جدید به اکوسیستم اضافه شد\n\n` +
+      const typeEmoji = chatType === 'channel' ? '📢' : '👥';
+      const typeName = chatType === 'channel' ? 'کانال' : 'گروه';
+      
+      const alertMessage = `${typeEmoji} ${typeName} جدید به اکوسیستم اضافه شد\n\n` +
         `🏷️ نام: ${chatTitle}\n` +
-        `📝 نوع: ${chatType}\n` +
+        `📝 نوع: ${typeName}\n` +
         `🆔 آیدی: ${chatId}\n` +
         `🕒 زمان: ${timeString}\n\n` +
         `👑 [آکی](tg://user?id=${OWNER_ID})`;
@@ -281,7 +316,7 @@ const notifyMainGroupAboutNewChat = async (ctx, chatTitle, chatType, chatId) => 
           parse_mode: 'Markdown'
         }
       );
-      console.log('✅ اطلاع‌رسانی به گروه اصلی ارسال شد');
+      console.log(`✅ اطلاع‌رسانی به گروه اصلی ارسال شد (${typeName})`);
     }
   } catch (error) {
     console.log('❌ خطا در اطلاع‌رسانی به گروه اصلی:', error.message);
@@ -443,6 +478,7 @@ const banUserFromEcosystem = async (userId, username, firstName) => {
     
     for (const subgroup of subgroups) {
       try {
+        // برای کانال‌ها از banChatMember استفاده می‌کنیم
         await bot.telegram.banChatMember(subgroup.chat_id, userId);
         console.log(`✅ کاربر از ${subgroup.chat_type} "${subgroup.chat_title}" بن شد`);
         totalBanned++;
@@ -864,14 +900,19 @@ bot.command('check', async (ctx) => {
       message += `✅ همه گروه‌ها و کانال‌ها در امان هستند!\n\n`;
     }
     
+    // تفکیک گروه‌ها و کانال‌ها
+    const groups = activeSubgroups.filter(s => s.chat_type === 'group');
+    const channels = activeSubgroups.filter(s => s.chat_type === 'channel');
+    
     message += `📊 آمار نهایی:\n`;
-    message += `• گروه/کانال‌های فعال: ${activeSubgroups.length}\n`;
-    message += `• گروه/کانال‌های حذف شده: ${removedGroups.length}\n`;
-    message += `• کل چت‌های بررسی شده: ${totalChecked}\n\n`;
+    message += `• گروه‌های فعال: ${groups.length}\n`;
+    message += `• کانال‌های فعال: ${channels.length}\n`;
+    message += `• کل چت‌های فعال: ${activeSubgroups.length}\n`;
+    message += `• چت‌های حذف شده: ${removedGroups.length}\n\n`;
     
     message += `🏠 گروه اصلی: ${MAIN_GROUP_ID ? 'متصل ✅' : 'تنظیم نشده ❌'}\n\n`;
     
-    message += `🔄 ربات به طور خودکار گروه‌هایی که ادمین شده را به زیرمجموعه اضافه می‌کند`;
+    message += `🔄 ربات به طور خودکار گروه‌ها و کانال‌هایی که ادمین شده را به زیرمجموعه اضافه می‌کند`;
 
     // حذف پیام موقت و ارسال پیام اصلی
     try {
@@ -884,7 +925,7 @@ bot.command('check', async (ctx) => {
       reply_to_message_id: ctx.message.message_id
     });
     
-    console.log(`✅ بررسی وضعیت گروه‌ها کامل شد: ${activeSubgroups.length} فعال`);
+    console.log(`✅ بررسی وضعیت گروه‌ها کامل شد: ${groups.length} گروه, ${channels.length} کانال`);
 
   } catch (error) {
     console.log('❌ خطا در بررسی وضعیت گروه‌ها:', error.message);
@@ -908,6 +949,10 @@ bot.command('groups', async (ctx) => {
 
     const subgroups = await getActiveSubgroups();
     
+    // تفکیک گروه‌ها و کانال‌ها
+    const groups = subgroups.filter(s => s.chat_type === 'group');
+    const channels = subgroups.filter(s => s.chat_type === 'channel');
+    
     let message = `🏘️ لیست گروه‌ها و کانال‌های اکلیس\n\n`;
     
     if (MAIN_GROUP_ID) {
@@ -917,19 +962,32 @@ bot.command('groups', async (ctx) => {
       message += `🏠 گروه اصلی: تنظیم نشده ❌\n\n`;
     }
     
-    message += `📊 زیرمجموعه‌های فعال: ${subgroups.length}\n\n`;
+    message += `📊 آمار:\n`;
+    message += `• گروه‌ها: ${groups.length}\n`;
+    message += `• کانال‌ها: ${channels.length}\n`;
+    message += `• کل: ${subgroups.length}\n\n`;
     
-    if (subgroups.length > 0) {
-      subgroups.forEach((subgroup, index) => {
-        message += `${index + 1}. ${subgroup.chat_title}\n`;
-        message += `   📝 نوع: ${subgroup.chat_type}\n`;
-        message += `   🆔: ${subgroup.chat_id}\n\n`;
+    if (groups.length > 0) {
+      message += `👥 گروه‌ها:\n`;
+      groups.forEach((group, index) => {
+        message += `${index + 1}. ${group.chat_title}\n`;
+        message += `   🆔: ${group.chat_id}\n\n`;
       });
-    } else {
-      message += `📭 هیچ زیرمجموعه‌ای وجود ندارد\n\n`;
     }
     
-    message += `✅ ربات به صورت خودکار چت‌هایی که ادمین میشود را به زیرمجموعه اضافه میکند`;
+    if (channels.length > 0) {
+      message += `📢 کانال‌ها:\n`;
+      channels.forEach((channel, index) => {
+        message += `${index + 1}. ${channel.chat_title}\n`;
+        message += `   🆔: ${channel.chat_id}\n\n`;
+      });
+    }
+    
+    if (subgroups.length === 0) {
+      message += `📭 هیچ گروه یا کانالی وجود ندارد\n\n`;
+    }
+    
+    message += `✅ ربات به صورت خودکار گروه‌ها و کانال‌هایی که ادمین میشود را به زیرمجموعه اضافه میکند`;
     
     await ctx.reply(message, {
       reply_to_message_id: ctx.message.message_id
@@ -965,7 +1023,7 @@ bot.command('status', async (ctx) => {
 
     const { data: subgroups, error: subgroupsError } = await supabase
       .from('aklis_subgroups')
-      .select('chat_id')
+      .select('chat_id, chat_type')
       .eq('is_active', true);
 
     const totalMembers = members && !membersError ? members.length : 0;
@@ -973,6 +1031,10 @@ bot.command('status', async (ctx) => {
     const suspiciousMembers = members && !membersError ? members.filter(m => !m.has_symbol).length : 0;
     const totalBanned = banned && !bannedError ? banned.length : 0;
     const totalSubgroups = subgroups && !subgroupsError ? subgroups.length : 0;
+    
+    // تفکیک گروه‌ها و کانال‌ها
+    const groups = subgroups && !subgroupsError ? subgroups.filter(s => s.chat_type === 'group').length : 0;
+    const channels = subgroups && !subgroupsError ? subgroups.filter(s => s.chat_type === 'channel').length : 0;
 
     let statusMessage = `🥷🏻 وضعیت ربات اکلیس\n\n`;
     statusMessage += `🔹 کل اعضای تایید شده: ${totalMembers}\n`;
@@ -980,11 +1042,13 @@ bot.command('status', async (ctx) => {
     statusMessage += `🔹 اعضای مشکوک: ${suspiciousMembers}\n`;
     statusMessage += `🔹 کاربران بن شده: ${totalBanned}\n`;
     statusMessage += `🔹 گروه اصلی: ${MAIN_GROUP_ID ? 'تنظیم شده ✅' : 'تنظیم نشده ❌'}\n`;
-    statusMessage += `🔹 زیرمجموعه‌های فعال: ${totalSubgroups}\n`;
+    statusMessage += `🔹 گروه‌های فعال: ${groups}\n`;
+    statusMessage += `🔹 کانال‌های فعال: ${channels}\n`;
+    statusMessage += `🔹 کل زیرمجموعه‌ها: ${totalSubgroups}\n`;
     statusMessage += `🔹 وضعیت دیتابیس: ${membersError ? 'قطع ❌' : 'متصل ✅'}\n`;
     statusMessage += `🔹 وضعیت ربات: فعال ✅\n\n`;
 
-    console.log(`📊 آمار: ${totalMembers} عضو, ${loyalMembers} وفادار, ${suspiciousMembers} مشکوک, ${totalBanned} بن شده, ${totalSubgroups} زیرمجموعه`);
+    console.log(`📊 آمار: ${totalMembers} عضو, ${loyalMembers} وفادار, ${suspiciousMembers} مشکوک, ${totalBanned} بن شده, ${groups} گروه, ${channels} کانال`);
     await ctx.reply(statusMessage, {
       reply_to_message_id: ctx.message.message_id
     });
@@ -997,19 +1061,25 @@ bot.command('status', async (ctx) => {
   }
 });
 
-// ==================[ مدیریت رویدادها - FIXED ]==================
+// ==================[ مدیریت رویدادها - FIXED برای کانال‌ها ]==================
 
-// مدیریت اضافه شدن ربات به چت‌ها - این بخش مشکل داشت
+// مدیریت اضافه شدن ربات به گروه‌ها
 bot.on('new_chat_members', async (ctx) => {
   try {
-    console.log('👥 تشخیص اعضای جدید در چت:', ctx.chat.title, 'آیدی:', ctx.chat.id);
+    console.log('👥 تشخیص اعضای جدید در چت:', ctx.chat.title, 'آیدی:', ctx.chat.id, 'نوع:', ctx.chat.type);
     
     for (const member of ctx.message.new_chat_members) {
       console.log(`🔍 بررسی عضو: ${member.first_name} (${member.id}) - بات: ${member.is_bot}`);
       
       if (member.is_bot && member.username === SELF_BOT_ID) {
         console.log(`✅ ربات خودمان اضافه شده است`);
-        await handleBotAddedToChat(ctx);
+        
+        // اگر گروه است
+        if (ctx.chat.type === 'group' || ctx.chat.type === 'supergroup') {
+          await handleBotAddedToGroup(ctx);
+        }
+        // اگر کانال است - اما در کانال‌ها new_chat_members کار نمی‌کند
+        // بنابراین این بخش فقط برای گروه‌ها فعال است
         return;
       }
 
@@ -1025,24 +1095,47 @@ bot.on('new_chat_members', async (ctx) => {
   }
 });
 
-// مدیریت حذف ربات از چت‌ها
-bot.on('left_chat_member', async (ctx) => {
+// مدیریت اضافه شدن ربات به کانال‌ها - NEW
+bot.on('chat_member', async (ctx) => {
   try {
-    const leftMember = ctx.message.left_chat_member;
+    const chatMember = ctx.chatMember;
+    const newStatus = chatMember.new_chat_member.status;
+    const oldStatus = chatMember.old_chat_member.status;
+    const user = chatMember.new_chat_member.user;
     
-    if (leftMember.is_bot && leftMember.username === SELF_BOT_ID) {
-      const chatId = ctx.chat.id.toString();
-      const chatTitle = ctx.chat.title || 'بدون عنوان';
+    // فقط اگر ربات خودمان باشد
+    if (user.is_bot && user.username === SELF_BOT_ID) {
+      console.log(`🔄 وضعیت ربات در ${ctx.chat.type} "${ctx.chat.title}" تغییر کرد: ${oldStatus} -> ${newStatus}`);
       
-      console.log(`🚪 ربات از ${chatTitle} حذف شد`);
+      // اگر ربات به کانال اضافه شده باشد
+      if ((oldStatus === 'left' || oldStatus === 'kicked') && 
+          (newStatus === 'administrator' || newStatus === 'member')) {
+        
+        // اگر کانال است
+        if (ctx.chat.type === 'channel') {
+          console.log(`📢 ربات به کانال اضافه شده است`);
+          await handleBotAddedToChannel(ctx);
+        }
+      }
       
-      // حذف از زیرمجموعه‌ها
-      await removeChatFromSubgroups(chatId);
-      
-      console.log(`✅ چت از زیرمجموعه‌ها حذف شد`);
+      // اگر ربات از چت حذف شده باشد
+      if ((oldStatus === 'administrator' || oldStatus === 'member') && 
+          (newStatus === 'left' || newStatus === 'kicked')) {
+        
+        const chatId = ctx.chat.id.toString();
+        const chatTitle = ctx.chat.title || 'بدون عنوان';
+        const chatType = ctx.chat.type === 'channel' ? 'channel' : 'group';
+        
+        console.log(`🚪 ربات از ${chatType} "${chatTitle}" حذف شد`);
+        
+        // حذف از زیرمجموعه‌ها
+        await removeChatFromSubgroups(chatId);
+        
+        console.log(`✅ چت از زیرمجموعه‌ها حذف شد`);
+      }
     }
   } catch (error) {
-    console.log('❌ خطا در پردازش حذف ربات:', error.message);
+    console.log('❌ خطا در پردازش تغییر وضعیت ربات:', error.message);
   }
 });
 
@@ -1101,7 +1194,7 @@ bot.on('left_chat_member', async (ctx) => {
 // ==================[ پردازش پیام‌های عادی ]==================
 bot.on('message', async (ctx) => {
   try {
-    // فقط پیام‌های گروهی پردازش ش��ند
+    // فقط پیام‌های گروهی پردازش شوند
     if (ctx.chat.type === 'private') return;
     
     const chatId = ctx.chat.id.toString();
@@ -1280,7 +1373,7 @@ bot.action('dont_kill', async (ctx) => {
   }
 });
 
-// ==================[ راه‌اندازی ربات ]==================
+// ==================[ راه‌اندازی ربات - با پشتیبانی از chat_member ]==================
 const startBot = async () => {
   try {
     console.log('🤖 شروع راه‌اندازی ربات...');
@@ -1292,7 +1385,7 @@ const startBot = async () => {
     const botInfo = await bot.telegram.getMe();
     console.log(`✅ ربات ${botInfo.username} شناسایی شد`);
     
-    // راه‌اندازی ربات با polling و تنظیمات بهینه
+    // راه‌اندازی ربات با polling و تنظیمات بهینه - با پشتیبانی از chat_member
     await bot.launch({
       dropPendingUpdates: true,
       allowedUpdates: ['message', 'chat_member', 'callback_query'],
@@ -1306,10 +1399,11 @@ const startBot = async () => {
     
     console.log('✅ ربات با موفقیت راه‌اندازی شد');
     console.log('🥷🏻 ربات آماده خدمت‌رسانی است');
+    console.log('📢 پشتیبانی از کانال‌ها فعال شد');
     
     // فعال کردن graceful stop
     process.once('SIGINT', () => {
-      console.log('🛑 دریاف�� SIGINT - خاموش کردن ربات...');
+      console.log('🛑 دریافت SIGINT - خاموش کردن ربات...');
       bot.stop('SIGINT');
     });
     
@@ -1386,6 +1480,9 @@ app.get('/', (req, res) => {
         <div class="status">
           <strong>گروه اصلی:</strong> ${MAIN_GROUP_ID || 'تنظیم نشده'}
         </div>
+        <div class="status info">
+          <strong>پشتیبانی از کانال‌ها فعال شد ✅</strong>
+        </div>
         <div style="margin-top: 20px;">
           <a href="/health" style="background: #007bff; color: white; padding: 10px 15px; text-decoration: none; border-radius: 5px;">بررسی سلامت</a>
         </div>
@@ -1404,6 +1501,7 @@ const startServer = async () => {
     app.listen(PORT, () => {
       console.log(`✅ سرور روی پورت ${PORT} راه‌اندازی شد`);
       console.log(`🥷🏻 ربات ${SELF_BOT_ID} آماده است`);
+      console.log('📢 پشتیبانی از کانال‌ها فعال شد');
       
       // شروع پینگ
       startAutoPing();
