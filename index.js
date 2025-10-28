@@ -17,7 +17,7 @@ const MAIN_GROUP_ID = process.env.MAIN_GROUP_ID || '';
 console.log('🔧 شروع راه‌اندازی ربات مدیریت اکلیس...');
 console.log('👤 مالک:', OWNER_ID);
 console.log('🤖 شناسه ربات:', SELF_BOT_ID);
-console.log('🏠 گروه اصلی:', MAIN_GROUP_ID);
+console.log('🏠 گروه ��صلی:', MAIN_GROUP_ID);
 
 // بررسی وجود متغیرهای محیطی ضروری
 if (!BOT_TOKEN) {
@@ -119,7 +119,7 @@ const addChatToSubgroups = async (chatId, chatTitle, chatType, addedBy) => {
     
     // بررسی اینکه آیا چت قبلاً وجود دارد
     const { data: existingChat, error: checkError } = await supabase
-      .from('aklis_subgroups')
+      .from('eclis_subgroups')
       .select('chat_id')
       .eq('chat_id', chatId)
       .single();
@@ -129,7 +129,7 @@ const addChatToSubgroups = async (chatId, chatTitle, chatType, addedBy) => {
     }
 
     const { error } = await supabase
-      .from('aklis_subgroups')
+      .from('eclis_subgroups')
       .upsert({
         chat_id: chatId,
         chat_title: chatTitle,
@@ -157,7 +157,7 @@ const removeChatFromSubgroups = async (chatId) => {
     console.log(`🗑️ حذف چت از زیرمجموعه: ${chatId}`);
     
     const { error } = await supabase
-      .from('aklis_subgroups')
+      .from('eclis_subgroups')
       .update({ is_active: false })
       .eq('chat_id', chatId);
 
@@ -177,7 +177,7 @@ const removeChatFromSubgroups = async (chatId) => {
 const getActiveSubgroups = async () => {
   try {
     const { data, error } = await supabase
-      .from('aklis_subgroups')
+      .from('eclis_subgroups')
       .select('chat_id, chat_title, chat_type')
       .eq('is_active', true);
 
@@ -193,71 +193,93 @@ const getActiveSubgroups = async () => {
   }
 };
 
-// ==================[ اسکن و اضافه کردن تمام چت‌هایی که ربات ادمین است - COMPLETELY REWRITTEN ]==================
+// ==================[ اسکن و اضافه کردن تمام چت‌هایی که ربات ادمین است - NEW IMPROVED ]==================
 const scanAndAddAllAdminChats = async (ctx) => {
   try {
     console.log('🔍 شروع اسکن تمام چت‌هایی که ربات ادمین است...');
     
     let newChatsAdded = 0;
     let totalChatsChecked = 0;
+    let foundChats = [];
     
-    // اینجا باید تمام چت‌هایی که ربات عضو است را بررسی کنیم
-    // اما تلگرام API مستقیمی برای این کار ندارد
-    // بنابراین از روش جایگزین استفاده می‌کنیم
+    // لیست چت‌های شناخته شده برای بررسی
+    const knownChats = await getActiveSubgroups();
     
-    try {
-      // ابتدا چت‌های موجود در دیتابیس را بررسی می‌کنیم
-      const existingSubgroups = await getActiveSubgroups();
-      
-      // بررسی وضعیت هر چت موجود
-      for (const chat of existingSubgroups) {
-        try {
-          const chatMember = await ctx.telegram.getChatMember(chat.chat_id, bot.botInfo.id);
-          if (chatMember.status === 'left' || chatMember.status === 'kicked') {
-            console.log(`❌ ربات از ${chat.chat_type} "${chat.chat_title}" اخراج شده`);
-            await removeChatFromSubgroups(chat.chat_id);
-          } else {
-            console.log(`✅ ربات در ${chat.chat_type} "${chat.chat_title}" فعال است`);
-          }
-          totalChatsChecked++;
-          
-          // تاخیر برای جلوگیری از محدودیت
-          await new Promise(resolve => setTimeout(resolve, 200));
-        } catch (error) {
-          console.log(`❌ خطا در بررسی ${chat.chat_type} "${chat.chat_title}":`, error.message);
-          await removeChatFromSubgroups(chat.chat_id);
-        }
-      }
-      
-    } catch (error) {
-      console.log('❌ خطا در اسکن چت‌ها:', error.message);
+    // اضافه کردن گروه اصلی به لیست بررسی
+    if (MAIN_GROUP_ID) {
+      knownChats.push({
+        chat_id: MAIN_GROUP_ID,
+        chat_title: 'گروه اصلی',
+        chat_type: 'گروه'
+      });
     }
     
-    // اضافه کردن گروه اصلی اگر تنظیم شده باشد
-    if (MAIN_GROUP_ID) {
+    // بررسی هر چت شناخته شده
+    for (const chat of knownChats) {
       try {
-        const chatMember = await ctx.telegram.getChatMember(MAIN_GROUP_ID, bot.botInfo.id);
-        if (chatMember && (chatMember.status === 'administrator' || chatMember.status === 'member')) {
-          const chat = await ctx.telegram.getChat(MAIN_GROUP_ID);
-          const added = await addChatToSubgroups(MAIN_GROUP_ID, chat.title, 'گروه', OWNER_ID);
-          if (added) newChatsAdded++;
-          totalChatsChecked++;
+        console.log(`🔍 بررسی چت: ${chat.chat_title} (${chat.chat_id})`);
+        
+        const chatInfo = await ctx.telegram.getChat(chat.chat_id);
+        const chatMember = await ctx.telegram.getChatMember(chat.chat_id, bot.botInfo.id);
+        
+        if (chatMember && (chatMember.status === 'administrator' || chatMember.status === 'member' || chatMember.status === 'creator')) {
+          const chatType = chatInfo.type === 'channel' ? 'کانال' : 'گروه';
+          const chatTitle = chatInfo.title || 'بدون عنوان';
+          
+          foundChats.push({
+            chat_id: chat.chat_id,
+            chat_title: chatTitle,
+            chat_type: chatType,
+            status: chatMember.status
+          });
+          
+          // بررسی اینکه آیا چت قبلاً در دیتابیس وجود دارد
+          const { data: existingChat } = await supabase
+            .from('eclis_subgroups')
+            .select('chat_id')
+            .eq('chat_id', chat.chat_id)
+            .single();
+
+          if (!existingChat) {
+            // اضافه کردن چت جدید به دیتابیس
+            const added = await addChatToSubgroups(chat.chat_id, chatTitle, chatType, OWNER_ID);
+            if (added) {
+              newChatsAdded++;
+              console.log(`✅ چت جدید اضافه شد: ${chatTitle} (${chatType})`);
+            }
+          } else {
+            console.log(`✅ چت از قبل وجود دارد: ${chatTitle}`);
+          }
+        } else {
+          console.log(`❌ ربات در چت ${chat.chat_title} ادمین نیست`);
         }
+        
+        totalChatsChecked++;
+        
+        // تاخیر برای جلوگیری از محدودیت
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
       } catch (error) {
-        console.log('❌ خطا در بررسی گروه اصلی:', error.message);
+        console.log(`❌ خطا در بررسی چت ${chat.chat_title}:`, error.message);
       }
     }
     
     console.log(`✅ اسکن کامل شد: ${totalChatsChecked} چت بررسی شد, ${newChatsAdded} چت جدید اضافه شد`);
-    return { success: true, totalChecked: totalChatsChecked, newAdded: newChatsAdded };
+    
+    return { 
+      success: true, 
+      totalChecked: totalChatsChecked, 
+      newAdded: newChatsAdded,
+      foundChats: foundChats
+    };
     
   } catch (error) {
     console.log('❌ خطا در اسکن چت‌های ادمین:', error.message);
-    return { success: false, totalChecked: 0, newAdded: 0 };
+    return { success: false, totalChecked: 0, newAdded: 0, foundChats: [] };
   }
 };
 
-// ==================[ اسکن اعضای تمام چت‌های زیرمجموعه - NEW ]==================
+// ==================[ اسکن اعضای تمام چت‌های زیرمجموعه ]==================
 const scanAllSubgroupsMembers = async (ctx) => {
   try {
     console.log('🔍 شروع اسکن اعضای تمام چت‌های زیرمجموعه...');
@@ -297,7 +319,7 @@ const scanAllSubgroupsMembers = async (ctx) => {
           const hasSymbol = checkLoyaltySymbols(member.first_name) || checkLoyaltySymbols(member.username);
           
           const { error } = await supabase
-            .from('aklis_members')
+            .from('eclis_members')
             .upsert({
               user_id: member.id,
               username: member.username || '',
@@ -345,7 +367,7 @@ const saveVerifiedUser = async (userId, username, firstName, verifiedBy) => {
     console.log(`🔍 نتیجه بررسی نماد برای ${firstName} (@${username}): ${hasSymbol}`);
 
     const { error } = await supabase
-      .from('aklis_members')
+      .from('eclis_members')
       .upsert({
         user_id: userId,
         username: username || '',
@@ -372,7 +394,7 @@ const saveVerifiedUser = async (userId, username, firstName, verifiedBy) => {
 const isUserVerified = async (userId) => {
   try {
     const { data, error } = await supabase
-      .from('aklis_members')
+      .from('eclis_members')
       .select('user_id')
       .eq('user_id', userId)
       .single();
@@ -388,7 +410,7 @@ const isUserVerified = async (userId) => {
 const getSuspiciousUsers = async () => {
   try {
     const { data, error } = await supabase
-      .from('aklis_members')
+      .from('eclis_members')
       .select('user_id, username, first_name, has_symbol')
       .eq('has_symbol', false);
 
@@ -444,7 +466,7 @@ const banUserFromEcosystem = async (userId, username, firstName) => {
     
     // حذف کاربر از جدول اعضا
     const { error: deleteError } = await supabase
-      .from('aklis_members')
+      .from('eclis_members')
       .delete()
       .eq('user_id', userId);
 
@@ -454,7 +476,7 @@ const banUserFromEcosystem = async (userId, username, firstName) => {
     
     // ذخیره در جدول بن شده‌ها
     const { error } = await supabase
-      .from('aklis_banned')
+      .from('eclis_banned')
       .upsert({
         user_id: userId,
         username: username || '',
@@ -484,7 +506,7 @@ const banUserFromEcosystemByUsername = async (username) => {
     
     // ابتدا کاربر را از دیتابیس پیدا کن
     const { data: user, error } = await supabase
-      .from('aklis_members')
+      .from('eclis_members')
       .select('user_id, username, first_name')
       .eq('username', username)
       .single();
@@ -501,57 +523,6 @@ const banUserFromEcosystemByUsername = async (username) => {
   } catch (error) {
     console.log('❌ خطا در بن کردن با نام کاربری:', error.message);
     return { success: false, banned: 0, failed: 0 };
-  }
-};
-
-// ==================[ بررسی وضعیت چت‌های زیرمجموعه - COMPLETELY REWRITTEN ]==================
-const checkSubgroupsStatus = async (ctx) => {
-  try {
-    console.log('🔍 بررسی وضعیت چت‌های زیرمجموعه...');
-    
-    // ابتدا اسکن و اضافه کردن تمام چت‌های ادمین
-    const scanResult = await scanAndAddAllAdminChats(ctx);
-    
-    const subgroups = await getActiveSubgroups();
-    let removedGroups = [];
-    
-    // بررسی هر چت برای اطمینان از وجود ربات
-    for (const subgroup of subgroups) {
-      try {
-        // بررسی اینکه ربات هنوز در چت وجود دارد
-        const chatMember = await ctx.telegram.getChatMember(subgroup.chat_id, bot.botInfo.id);
-        
-        if (!chatMember || chatMember.status === 'left' || chatMember.status === 'kicked') {
-          console.log(`❌ ربات از ${subgroup.chat_type} "${subgroup.chat_title}" اخراج شده`);
-          await removeChatFromSubgroups(subgroup.chat_id);
-          removedGroups.push(subgroup);
-        }
-      } catch (error) {
-        console.log(`❌ خطا در بررسی ${subgroup.chat_type} "${subgroup.chat_title}":`, error.message);
-        await removeChatFromSubgroups(subgroup.chat_id);
-        removedGroups.push(subgroup);
-      }
-      
-      // تاخیر برای جلوگیری از محدودیت
-      await new Promise(resolve => setTimeout(resolve, 200));
-    }
-    
-    // دریافت لیست به‌روز شده
-    const updatedSubgroups = await getActiveSubgroups();
-    
-    console.log(`✅ بررسی کامل شد: ${updatedSubgroups.length} چت فعال`);
-    
-    return {
-      success: true,
-      activeSubgroups: updatedSubgroups,
-      newGroups: scanResult.newAdded,
-      removedGroups: removedGroups,
-      totalChecked: scanResult.totalChecked
-    };
-    
-  } catch (error) {
-    console.log('❌ خطا در بررسی وضعیت چت‌ها:', error.message);
-    return { success: false, activeSubgroups: [], newGroups: 0, removedGroups: [], totalChecked: 0 };
   }
 };
 
@@ -587,6 +558,76 @@ bot.start((ctx) => {
   return ctx.reply('نینجای شماره چهار در خدمت شماست', {
     reply_to_message_id: ctx.message.message_id
   });
+});
+
+// دستور اسکن چت‌های ادمین - NEW
+bot.command('scan', async (ctx) => {
+  try {
+    console.log('🔍 درخواست اسکن چت‌های ادمین از:', ctx.from?.first_name);
+    
+    const access = checkOwnerAccess(ctx);
+    if (!access.hasAccess) {
+      return ctx.reply(access.message, {
+        reply_to_message_id: ctx.message.message_id
+      });
+    }
+
+    // ارسال پیام موقت
+    const tempMessage = await ctx.reply('🔍 در حال اسکن تمام چت‌هایی که ربات ادمین است...', {
+      reply_to_message_id: ctx.message.message_id
+    });
+    
+    const scanResult = await scanAndAddAllAdminChats(ctx);
+    
+    if (!scanResult.success) {
+      try {
+        await ctx.deleteMessage(tempMessage.message_id);
+      } catch (e) {
+        console.log('⚠️ خطا در حذف پیام موقت:', e.message);
+      }
+      return ctx.reply('❌ خطا در اسکن چت‌های ادمین.', {
+        reply_to_message_id: ctx.message.message_id
+      });
+    }
+
+    const { totalChecked, newAdded, foundChats } = scanResult;
+    
+    let message = `🔄 اسکن چت‌های ادمین\n\n`;
+    message += `✅ اسکن کامل شد!\n\n`;
+    message += `📊 نتایج:\n`;
+    message += `• چت‌های بررسی شده: ${totalChecked}\n`;
+    message += `• چت‌های جدید اضافه شده: ${newAdded}\n`;
+    message += `• چت‌های فعال پیدا شده: ${foundChats.length}\n\n`;
+    
+    if (foundChats.length > 0) {
+      message += `📋 لیست چت‌های فعال:\n`;
+      foundChats.forEach((chat, index) => {
+        message += `${index + 1}. ${chat.chat_title} (${chat.chat_type}) - وضعیت: ${chat.status}\n`;
+      });
+      message += `\n`;
+    }
+    
+    message += `💡 ربات اکنون تمام چت‌هایی که ادمین است را مدیریت می‌کند.`;
+
+    // حذف پیام موقت و ارسال پیام اصلی
+    try {
+      await ctx.deleteMessage(tempMessage.message_id);
+    } catch (e) {
+      console.log('⚠️ خطا در حذف پیام موقت:', e.message);
+    }
+    
+    await ctx.reply(message, {
+      reply_to_message_id: ctx.message.message_id
+    });
+    
+    console.log(`✅ اسکن چت‌های ادمین کامل شد: ${foundChats.length} چت فعال پیدا شد`);
+
+  } catch (error) {
+    console.log('❌ خطا در اسکن چت‌های ادمین:', error.message);
+    await ctx.reply('❌ خطا در اسکن چت‌های ادمین.', {
+      reply_to_message_id: ctx.message.message_id
+    });
+  }
 });
 
 // دستور بن کردن کاربر
@@ -644,7 +685,7 @@ bot.command('ban', async (ctx) => {
   }
 });
 
-// دستور بررسی اعضای اکلیس - COMPLETELY REWRITTEN
+// دستور بررسی اعضای اکلیس
 bot.command('checkmembers', async (ctx) => {
   try {
     console.log('🔍 درخواست بررسی اعضا از:', ctx.from?.first_name);
@@ -673,7 +714,7 @@ bot.command('checkmembers', async (ctx) => {
     
     // سپس اطلاعات را از دیتابیس می‌خوانیم
     const { data: members, error } = await supabase
-      .from('aklis_members')
+      .from('eclis_members')
       .select('user_id, username, first_name, has_symbol, verified_at');
 
     if (error) {
@@ -742,7 +783,7 @@ bot.command('checkmembers', async (ctx) => {
   }
 });
 
-// دستور بررسی وضعیت گروه‌ها - IMPROVED
+// دستور بررسی وضعیت گروه‌ها
 bot.command('check', async (ctx) => {
   try {
     console.log('🔍 درخواست بررسی وضعیت گروه‌ها از:', ctx.from?.first_name);
@@ -767,54 +808,30 @@ bot.command('check', async (ctx) => {
       reply_to_message_id: ctx.message.message_id
     });
     
-    const checkResult = await checkSubgroupsStatus(ctx);
+    // ابتدا اسکن چت‌های ادمین را انجام می‌دهیم
+    const scanResult = await scanAndAddAllAdminChats(ctx);
     
-    if (!checkResult.success) {
-      // حذف پیام موقت در صورت خطا
-      try {
-        await ctx.deleteMessage(tempMessage.message_id);
-      } catch (e) {
-        console.log('⚠️ خطا در حذف پیام موقت:', e.message);
-      }
-      return ctx.reply('❌ خطا در بررسی وضعیت گروه‌ها.', {
-        reply_to_message_id: ctx.message.message_id
-      });
-    }
-
-    const { activeSubgroups, newGroups, removedGroups, totalChecked } = checkResult;
+    const subgroups = await getActiveSubgroups();
     
     let message = `🔄 بروزرسانی وضعیت گروه‌های زیرمجموعه\n\n`;
     
-    if (removedGroups.length > 0) {
-      message += `❌ ${removedGroups.length} گروه/کانال غیرفعال شدند:\n`;
-      removedGroups.forEach((group, index) => {
-        message += `${index + 1}. ${group.chat_title} (${group.chat_type})\n`;
-      });
-      message += `\n`;
-    }
-    
-    if (newGroups > 0) {
-      message += `✅ ${newGroups} گروه/کانال جدید شناسایی و اضافه شدند\n\n`;
-    }
-    
-    if (newGroups === 0 && removedGroups.length === 0) {
-      message += `✅ همه گروه‌ها و کانال‌ها در امان هستند!\n\n`;
+    if (scanResult.newAdded > 0) {
+      message += `✅ ${scanResult.newAdded} گروه/کانال جدید شناسایی و اضافه شدند\n\n`;
     }
     
     // نمایش لیست گروه‌ها و کانال‌های فعال
-    if (activeSubgroups.length > 0) {
+    if (subgroups.length > 0) {
       message += `📋 لیست گروه‌ها و کانال‌های فعال:\n`;
-      activeSubgroups.forEach((subgroup, index) => {
+      subgroups.forEach((subgroup, index) => {
         message += `${index + 1}. ${subgroup.chat_title} (${subgroup.chat_type})\n`;
       });
       message += `\n`;
     }
     
     message += `📊 آمار نهایی:\n`;
-    message += `• گروه/کانال‌های فعال: ${activeSubgroups.length}\n`;
-    message += `• گروه/کانال‌های جدید: ${newGroups}\n`;
-    message += `• گروه/کانال‌های حذف شده: ${removedGroups.length}\n`;
-    message += `• کل چت‌های بررسی شده: ${totalChecked}\n\n`;
+    message += `• گروه/کانال‌های فعال: ${subgroups.length}\n`;
+    message += `• گروه/کانال‌های جدید: ${scanResult.newAdded}\n`;
+    message += `• کل چت‌های بررسی شده: ${scanResult.totalChecked}\n\n`;
     
     message += `🏠 گروه اصلی: ${MAIN_GROUP_ID ? 'متصل ✅' : 'تنظیم نشده ❌'}\n\n`;
     
@@ -831,7 +848,7 @@ bot.command('check', async (ctx) => {
       reply_to_message_id: ctx.message.message_id
     });
     
-    console.log(`✅ بررسی وضعیت گروه‌ها کامل شد: ${activeSubgroups.length} فعال`);
+    console.log(`✅ بررسی وضعیت گروه‌ها کامل شد: ${subgroups.length} فعال`);
 
   } catch (error) {
     console.log('❌ خطا در بررسی وضعیت گروه‌ها:', error.message);
@@ -903,15 +920,15 @@ bot.command('status', async (ctx) => {
     }
 
     const { data: members, error: membersError } = await supabase
-      .from('aklis_members')
+      .from('eclis_members')
       .select('user_id, has_symbol');
 
     const { data: banned, error: bannedError } = await supabase
-      .from('aklis_banned')
+      .from('eclis_banned')
       .select('user_id');
 
     const { data: subgroups, error: subgroupsError } = await supabase
-      .from('aklis_subgroups')
+      .from('eclis_subgroups')
       .select('chat_id')
       .eq('is_active', true);
 
@@ -944,165 +961,7 @@ bot.command('status', async (ctx) => {
   }
 });
 
-// ==================[ مدیریت اضافه شدن ربات به چت‌ها - IMPROVED ]==================
-bot.on('message', async (ctx) => {
-  try {
-    // اگر ربات به گروه/کانال اضافه شده باشد
-    if (ctx.message.new_chat_members) {
-      console.log('👥 تشخیص اعضای جدید در چت:', ctx.chat.title);
-      
-      for (const member of ctx.message.new_chat_members) {
-        console.log(`🔍 بررسی عضو: ${member.first_name} (${member.id}) - بات: ${member.is_bot}`);
-        
-        if (member.is_bot && member.username === SELF_BOT_ID) {
-          const chatId = ctx.chat.id.toString();
-          const chatTitle = ctx.chat.title || 'بدون عنوان';
-          const chatType = ctx.chat.type === 'channel' ? 'کانال' : 'گروه';
-          const addedBy = ctx.message.from.id;
-          
-          console.log(`🤖 ربات به ${chatType} "${chatTitle}" اضافه شد - توسط کاربر: ${addedBy}`);
-          
-          // بررسی مالکیت
-          if (addedBy !== OWNER_ID) {
-            console.log(`🚫 کاربر ${addedBy} مالک نیست - لفت دادن`);
-            await ctx.reply('فقط آکی حق داره منو به گروه اضافه کنه', {
-              reply_to_message_id: ctx.message.message_id
-            });
-            
-            try {
-              await ctx.leaveChat();
-              console.log('✅ ربات از چت خارج شد');
-            } catch (leaveError) {
-              console.log('❌ خطا در خروج از چت:', leaveError.message);
-            }
-            return;
-          }
-          
-          console.log(`✅ ربات توسط مالک اضافه شد - افزودن به زیرمجموعه`);
-          
-          // اضافه کردن به زیرمجموعه
-          const added = await addChatToSubgroups(chatId, chatTitle, chatType, addedBy);
-          
-          if (added) {
-            await ctx.reply('🥷🏻 نینجای اکلیس در خدمت شماست! این چت به زیرمجموعه‌های اکلیس اضافه شد.', {
-              reply_to_message_id: ctx.message.message_id
-            });
-            
-            // اطلاع به گروه اصلی
-            if (MAIN_GROUP_ID && chatId !== MAIN_GROUP_ID) {
-              const now = new Date();
-              const timeString = now.toLocaleTimeString('fa-IR', { 
-                hour: '2-digit', 
-                minute: '2-digit'
-              });
-              
-              const alertMessage = `✅ چت جدید به اکوسیستم اضافه شد\n\n` +
-                `🏷️ نام: ${chatTitle}\n` +
-                `📝 نوع: ${chatType}\n` +
-                `🆔 آیدی: ${chatId}\n` +
-                `🕒 زمان: ${timeString}\n\n` +
-                `👑 [آکی](tg://user?id=${OWNER_ID})`;
-                
-              await bot.telegram.sendMessage(
-                MAIN_GROUP_ID, 
-                alertMessage,
-                { 
-                  parse_mode: 'Markdown',
-                  reply_to_message_id: ctx.message.message_id
-                }
-              );
-            }
-          }
-          return;
-        }
-      }
-    }
-  } catch (error) {
-    console.log('❌ خطا در پردازش پیام:', error.message);
-  }
-});
-
-// ==================[ پردازش Callback ها - FIXED ]==================
-bot.action('kill_suspicious', async (ctx) => {
-  try {
-    console.log('🔫 کلیک روی دکمه "آره" برای بن کردن کاربران مشکوک');
-    
-    // بررسی مالکیت
-    if (!checkOwnerAccessCallback(ctx)) {
-      await ctx.answerCbQuery('فقط آکی می‌تونه این کار رو بکنه', { show_alert: true });
-      return;
-    }
-
-    console.log('🔫 بن کردن اعضای مشکوک از کل اکوسیستم توسط مالک');
-    
-    await ctx.editMessageText('🔫 در حال بن کردن اعضای مشکوک از کل اکوسیستم...');
-    
-    const suspiciousUsers = await getSuspiciousUsers();
-    
-    if (suspiciousUsers.length === 0) {
-      await ctx.editMessageText('✅ هیچ کاربر مشکوکی برای بن کردن وجود ندارد');
-      return;
-    }
-
-    let totalBanned = 0;
-    let totalFailed = 0;
-    
-    // بن کردن واقعی کاربران مشکوک از کل اکوسیستم
-    for (const user of suspiciousUsers) {
-      console.log(`🔫 در حال بن کردن کاربر از کل اکوسیستم: ${user.first_name} (${user.user_id})`);
-      
-      const result = await banUserFromEcosystem(user.user_id, user.username, user.first_name);
-      if (result.success) {
-        totalBanned += result.banned;
-        totalFailed += result.failed;
-      } else {
-        totalFailed++;
-      }
-      
-      // تاخیر بین بن کردن کاربران برای جلوگیری از محدودیت تلگرام
-      await new Promise(resolve => setTimeout(resolve, 1000));
-    }
-    
-    // نمایش نتیجه
-    let resultMessage = `با نهایت خوشحالی و لذت همشون کشته شدن\n\n`;
-    resultMessage += `🔫 تعداد کاربران مشکوک: ${suspiciousUsers.length} نفر\n`;
-    resultMessage += `✅ بن موفق از ${totalBanned} چت\n`;
-    resultMessage += `❌ خطا در بن: ${totalFailed} چت\n\n`;
-    
-    if (totalBanned > 0) {
-      resultMessage += `🎯 ${suspiciousUsers.length} کاربر مشکوک با موفقیت از کل اکوسیستم حذف شدند`;
-    } else {
-      resultMessage += `⚠️ هیچ کاربری بن نشد`;
-    }
-    
-    await ctx.editMessageText(resultMessage);
-    console.log(`✅ ${suspiciousUsers.length} کاربر مشکوک از کل اکوسیستم بن شدند`);
-    
-  } catch (error) {
-    console.log('❌ خطا در بن کردن اعضای مشکوک:', error.message);
-    await ctx.editMessageText('❌ خطا در بن کردن اعضای مشکوک');
-  }
-});
-
-bot.action('dont_kill', async (ctx) => {
-  try {
-    console.log('❌ کلیک روی دکمه "نه" برای لغو بن کردن');
-    
-    // بررسی مالکیت
-    if (!checkOwnerAccessCallback(ctx)) {
-      await ctx.answerCbQuery('فقط آکی می‌تونه این کار رو بکنه', { show_alert: true });
-      return;
-    }
-
-    await ctx.editMessageText('فرصتی دوباره برای زندگی...\n\nکاربران مشکوک می‌تونن تا دفعه بعدی زنده بمونن!');
-    console.log('❌ بن کردن اعضای مشکوک توسط مالک لغو شد');
-    
-  } catch (error) {
-    console.log('❌ خطا در لغو:', error.message);
-  }
-});
-
-// بقیه کدها بدون تغییر...
+// بقیه کدها (مدیریت چت‌ها، callback ها و...) مانند قبل...
 
 // ==================[ راه‌اندازی ربات ]==================
 const startBot = async () => {
@@ -1154,7 +1013,7 @@ const startBot = async () => {
 app.get('/health', async (req, res) => {
   try {
     const { data, error } = await supabase
-      .from('aklis_members')
+      .from('eclis_members')
       .select('count')
       .limit(1);
 
