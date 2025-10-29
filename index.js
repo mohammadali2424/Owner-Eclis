@@ -120,7 +120,7 @@ bot.use(async (ctx, next) => {
   try {
     await next();
   } catch (error) {
-    console.log('❌ خطا در پردازش درخواست:', error.message);
+    console.log('❌ خطا در پردا��ش درخواست:', error.message);
     
     try {
       await supabase
@@ -559,7 +559,7 @@ bot.on('new_chat_members', async (ctx) => {
           chat_id: chatId,
           question_message_id: questionMessage.message_id,
           joined_at: new Date().toISOString()
-        }, { onConflict: 'user_id' );
+        }, { onConflict: 'user_id' });
 
       // سکوت کاربر تا زمان تایید
       try {
@@ -648,7 +648,7 @@ bot.action(/approve_(\d+)/, async (ctx) => {
         approved_by: OWNER_ID,
         approved_at: new Date().toISOString(),
         is_approved: true
-      }, { onConflict: 'user_id' );
+      }, { onConflict: 'user_id' });
 
     // حذف کاربر از لیست منتظران
     await supabase
@@ -884,7 +884,7 @@ bot.command('بررسی_وفاداری', async (ctx) => {
       reply_markup: {
         inline_keyboard: [
           [
-            { text: 'آره ، همشون رو بکش', callback_data: 'ban_suspicious' },
+            { text: 'آره �� همشون رو بکش', callback_data: 'ban_suspicious' },
             { text: 'نه ، نکششون', callback_data: 'dont_ban_suspicious' }
           ]
         ]
@@ -898,7 +898,7 @@ bot.command('بررسی_وفاداری', async (ctx) => {
         key: 'suspicious_list',
         data: { suspiciousList: suspiciousList },
         created_at: new Date().toISOString()
-      }, { onConflict: 'key' );
+      }, { onConflict: 'key' });
 
     // ارسال استیکر بررسی وفاداری
     const stickerId = await getSticker('loyalty_scan');
@@ -1052,7 +1052,7 @@ bot.command('setsticker', async (ctx) => {
     }
 
   } catch (error) {
-    console.log('❌ خطا در تنظیم استیکر:', error.message);
+    console.log('❌ خطا در ت��ظیم استیکر:', error.message);
     await ctx.reply('❌ خطا در تنظیم استیکر', {
       reply_to_message_id: ctx.message.message_id
     });
@@ -1101,7 +1101,191 @@ bot.command('help', (ctx) => {
   });
 });
 
-// [بقیه دستورات مانند update_chats, add_chat, groups, status مانند قبل - با اصلاح نام Eclis]
+bot.command('status', async (ctx) => {
+  const access = checkOwnerAccess(ctx);
+  if (!access.hasAccess) {
+    return ctx.reply(access.message, {
+      reply_to_message_id: ctx.message.message_id
+    });
+  }
+  
+  const subgroups = await getActiveSubgroups();
+  
+  const message = `🤖 وضعیت ربات مدیریت Eclis
+
+📊 آمار:
+• گروه‌های فعال: ${subgroups.length}
+• زمان فعالیت: ${Math.round(process.uptime() / 60)} دقیقه
+
+✅ ربات در حال اجرا است`;
+
+  await ctx.reply(message, {
+    reply_to_message_id: ctx.message.message_id
+  });
+});
+
+bot.command('groups', async (ctx) => {
+  const access = checkOwnerAccess(ctx);
+  if (!access.hasAccess) {
+    return ctx.reply(access.message, {
+      reply_to_message_id: ctx.message.message_id
+    });
+  }
+
+  const subgroups = await getActiveSubgroups();
+  
+  if (subgroups.length === 0) {
+    return ctx.reply('📭 هیچ گروه فعالی پیدا نشد', {
+      reply_to_message_id: ctx.message.message_id
+    });
+  }
+
+  let message = `🏘️ گروه‌های فعال (${subgroups.length}):\n\n`;
+  
+  subgroups.forEach((group, index) => {
+    message += `${index + 1}. ${group.chat_title} (${group.chat_type})\n`;
+    message += `   ID: ${group.chat_id}\n\n`;
+  });
+
+  await ctx.reply(message, {
+    reply_to_message_id: ctx.message.message_id
+  });
+});
+
+// ==================[ دستور اصلی: بروزرسانی وضعیت چت‌ها ]==================
+bot.command('update_chats', async (ctx) => {
+  try {
+    console.log('🔄 درخواست بروزرسانی وضعیت چت‌ها');
+    
+    const access = checkOwnerAccess(ctx);
+    if (!access.hasAccess) {
+      return ctx.reply(access.message, {
+        reply_to_message_id: ctx.message.message_id
+      });
+    }
+
+    await logActivity('update_chats_started', {}, ctx.from.id, ctx.chat.id);
+
+    const tempMessage = await ctx.reply('🔄 در حال کشف و بروزرسانی تمام چت‌ها...', {
+      reply_to_message_id: ctx.message.message_id
+    });
+    
+    const discoveryResult = await discoverAdminChats(ctx);
+    
+    if (!discoveryResult.success) {
+      try {
+        await ctx.deleteMessage(tempMessage.message_id);
+      } catch (e) {}
+      await logActivity('update_chats_failed', { error: 'Discovery failed' }, ctx.from.id, ctx.chat.id);
+      return ctx.reply('❌ خطا در بروزرس��نی چت‌ها.', {
+        reply_to_message_id: ctx.message.message_id
+      });
+    }
+
+    const { total, newAdded, discoveredChats } = discoveryResult;
+    
+    let message = `🔄 بروزرسانی وضعیت چت‌ها\n\n`;
+    message += `✅ عملیات موفق!\n\n`;
+    message += `📊 نتایج:\n`;
+    message += `• کل چت‌های فعال: ${total}\n`;
+    message += `• چت‌های جدید: ${newAdded}\n\n`;
+    
+    if (discoveredChats.length > 0) {
+      message += `🏘️ چت‌های فعال:\n`;
+      discoveredChats.forEach((chat, index) => {
+        const statusIcon = chat.status === 'creator' ? '👑' : '⚡';
+        const newIcon = chat.is_new ? ' 🆕' : '';
+        message += `${index + 1}. ${chat.chat_title} (${chat.chat_type}) ${statusIcon}${newIcon}\n`;
+      });
+    } else {
+      message += `📭 هیچ چت فعالی پیدا نشد\n`;
+    }
+
+    try {
+      await ctx.deleteMessage(tempMessage.message_id);
+    } catch (e) {}
+    
+    await ctx.reply(message, {
+      reply_to_message_id: ctx.message.message_id
+    });
+
+    await logActivity('update_chats_completed', discoveryResult, ctx.from.id, ctx.chat.id);
+
+  } catch (error) {
+    console.log('❌ خطا در بروزرسانی چت‌ها:', error.message);
+    await logActivity('update_chats_error', { error: error.message }, ctx.from.id, ctx.chat.id);
+    await ctx.reply('❌ خطا در بروزرسانی چت‌ها.', {
+      reply_to_message_id: ctx.message.message_id
+    });
+  }
+});
+
+// ==================[ دستور اضافه کردن دستی چت ]==================
+bot.command('add_chat', async (ctx) => {
+  try {
+    const access = checkOwnerAccess(ctx);
+    if (!access.hasAccess) {
+      return ctx.reply(access.message, {
+        reply_to_message_id: ctx.message.message_id
+      });
+    }
+
+    const args = ctx.message.text.split(' ');
+    if (args.length >= 2) {
+      const chatId = args[1];
+      
+      try {
+        const chatInfo = await ctx.telegram.getChat(chatId);
+        const chatMember = await ctx.telegram.getChatMember(chatId, bot.botInfo.id);
+        
+        if (chatMember.status === 'administrator' || chatMember.status === 'creator') {
+          const chatType = chatInfo.type === 'channel' ? 'کانال' : 'گروه';
+          const chatTitle = chatInfo.title || 'بدون عنوان';
+          
+          const added = await addChatToSubgroups(chatId, chatTitle, chatType, OWNER_ID);
+          
+          if (added) {
+            await logActivity('add_chat_success', { chatId, chatTitle, chatType }, ctx.from.id, ctx.chat.id);
+            await ctx.reply(`✅ ${chatType} "${chatTitle}" با موفقیت اضافه شد`, {
+              reply_to_message_id: ctx.message.message_id
+            });
+          } else {
+            await logActivity('add_chat_failed', { chatId, error: 'Database error' }, ctx.from.id, ctx.chat.id);
+            await ctx.reply('❌ خطا در ذخیره چت', {
+              reply_to_message_id: ctx.message.message_id
+            });
+          }
+        } else {
+          await logActivity('add_chat_not_admin', { chatId }, ctx.from.id, ctx.chat.id);
+          await ctx.reply('❌ ربات در این چت ادمین نیست', {
+            reply_to_message_id: ctx.message.message_id
+          });
+        }
+      } catch (error) {
+        await logActivity('add_chat_error', { chatId, error: error.message }, ctx.from.id, ctx.chat.id);
+        await ctx.reply(`❌ خطا: ${error.message}`, {
+          reply_to_message_id: ctx.message.message_id
+        });
+      }
+      return;
+    }
+
+    const helpText = `💡 برای افزودن دستی چت:\n\n` +
+      `/add_chat <chat_id>\n\n` +
+      `📝 برای دریافت chat_id از @userinfobot استفاده کنید`;
+
+    await ctx.reply(helpText, {
+      reply_to_message_id: ctx.message.message_id
+    });
+
+  } catch (error) {
+    console.log('❌ خطا در افزودن چت:', error.message);
+    await logActivity('add_chat_command_error', { error: error.message }, ctx.from.id, ctx.chat.id);
+    await ctx.reply('❌ خطا در افزودن چت', {
+      reply_to_message_id: ctx.message.message_id
+    });
+  }
+});
 
 // ==================[ راه‌اندازی ]==================
 const startBot = async () => {
