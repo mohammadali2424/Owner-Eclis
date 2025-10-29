@@ -12,19 +12,64 @@ const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_KEY;
 const OWNER_ID = parseInt(process.env.OWNER_ID) || 0;
 const MAIN_GROUP_ID = process.env.MAIN_GROUP_ID || '';
+const RENDER_URL = process.env.RENDER_URL || ''; // آدرس دپلوی رندر
 
 console.log('🔧 شروع راه‌اندازی ربات مدیریت Eclis...');
+console.log('📋 بررسی تنظیمات محیطی...');
 
 // بررسی وجود متغیرهای محیطی ضروری
-if (!BOT_TOKEN || !SUPABASE_URL || !SUPABASE_KEY || !MAIN_GROUP_ID) {
-  console.log('❌ تنظیمات ضروری وجود ندارد');
+if (!BOT_TOKEN) {
+  console.log('❌ BOT_TOKEN وجود ندارد');
   process.exit(1);
 }
+if (!SUPABASE_URL) {
+  console.log('❌ SUPABASE_URL وجود ندارد');
+  process.exit(1);
+}
+if (!SUPABASE_KEY) {
+  console.log('❌ SUPABASE_KEY وجود ندارد');
+  process.exit(1);
+}
+if (!MAIN_GROUP_ID) {
+  console.log('❌ MAIN_GROUP_ID وجود ندارد');
+  process.exit(1);
+}
+
+console.log('✅ تمام تنظیمات بررسی شد');
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 const bot = new Telegraf(BOT_TOKEN);
 
 app.use(express.json());
+
+// ==================[ سیستم پینگ خودکار ]==================
+const startPingService = () => {
+  if (RENDER_URL) {
+    console.log('🔄 راه‌اندازی سیستم پینگ خودکار...');
+    
+    // پینگ هر 13 دقیقه
+    setInterval(async () => {
+      try {
+        const response = await axios.get(`${RENDER_URL}/health`);
+        console.log('✅ پینگ موفق:', new Date().toLocaleTimeString('fa-IR'));
+      } catch (error) {
+        console.log('❌ خطا در پینگ:', error.message);
+      }
+    }, 13 * 60 * 1000); // 13 دقیقه
+
+    // پینگ اولیه
+    setTimeout(async () => {
+      try {
+        await axios.get(`${RENDER_URL}/health`);
+        console.log('✅ اولین پینگ ارسال شد');
+      } catch (error) {
+        console.log('❌ خطا در اولین پینگ:', error.message);
+      }
+    }, 5000);
+  } else {
+    console.log('⚠️ آدرس RENDER_URL تنظیم نشده - پینگ غیرفعال');
+  }
+};
 
 // ==================[ سیستم محدودیت نرخ ]==================
 const rateLimit = new Map();
@@ -120,7 +165,7 @@ bot.use(async (ctx, next) => {
   try {
     await next();
   } catch (error) {
-    console.log('❌ خطا در پردا��ش درخواست:', error.message);
+    console.log('❌ خطا در پردازش درخواست:', error.message);
     
     try {
       await supabase
@@ -884,7 +929,7 @@ bot.command('بررسی_وفاداری', async (ctx) => {
       reply_markup: {
         inline_keyboard: [
           [
-            { text: 'آره �� همشون رو بکش', callback_data: 'ban_suspicious' },
+            { text: 'آره ، همشون رو بکش', callback_data: 'ban_suspicious' },
             { text: 'نه ، نکششون', callback_data: 'dont_ban_suspicious' }
           ]
         ]
@@ -1052,7 +1097,7 @@ bot.command('setsticker', async (ctx) => {
     }
 
   } catch (error) {
-    console.log('❌ خطا در ت��ظیم استیکر:', error.message);
+    console.log('❌ خطا در تنظیم استیکر:', error.message);
     await ctx.reply('❌ خطا در تنظیم استیکر', {
       reply_to_message_id: ctx.message.message_id
     });
@@ -1060,28 +1105,35 @@ bot.command('setsticker', async (ctx) => {
 });
 
 // ==================[ دستورات اصلی ]==================
-bot.start((ctx) => {
-  const access = checkOwnerAccess(ctx);
-  if (!access.hasAccess) {
-    return ctx.reply(access.message, {
+bot.start(async (ctx) => {
+  try {
+    console.log('🚀 دستور /start دریافت شد');
+    const access = checkOwnerAccess(ctx);
+    if (!access.hasAccess) {
+      return ctx.reply(access.message, {
+        reply_to_message_id: ctx.message.message_id
+      });
+    }
+    
+    await ctx.reply('🥷🏻 ربات مدیریت Eclis فعال است\n\nاز /help برای راهنما استفاده کنید', {
       reply_to_message_id: ctx.message.message_id
     });
+  } catch (error) {
+    console.log('❌ خطا در دستور start:', error.message);
   }
-  
-  return ctx.reply('🥷🏻 ربات مدیریت Eclis فعال است\n\nاز /help برای راهنما استفاده کنید', {
-    reply_to_message_id: ctx.message.message_id
-  });
 });
 
-bot.command('help', (ctx) => {
-  const access = checkOwnerAccess(ctx);
-  if (!access.hasAccess) {
-    return ctx.reply(access.message, {
-      reply_to_message_id: ctx.message.message_id
-    });
-  }
-  
-  const helpText = `🥷🏻 راهنمای ربات مدیریت Eclis
+bot.command('help', async (ctx) => {
+  try {
+    console.log('ℹ️ دستور /help دریافت شد');
+    const access = checkOwnerAccess(ctx);
+    if (!access.hasAccess) {
+      return ctx.reply(access.message, {
+        reply_to_message_id: ctx.message.message_id
+      });
+    }
+    
+    const helpText = `🥷🏻 راهنمای ربات مدیریت Eclis
 
 📋 دستورات:
 /update_chats - کشف و بروزرسانی چت‌ها
@@ -1096,67 +1148,80 @@ bot.command('help', (ctx) => {
 - ربات به صورت خودکار چت‌های جدید را تشخیص می‌دهد
 - فقط اعضای دارای نماد وفاداری ایمن هستند`;
 
-  ctx.reply(helpText, {
-    reply_to_message_id: ctx.message.message_id
-  });
+    await ctx.reply(helpText, {
+      reply_to_message_id: ctx.message.message_id
+    });
+  } catch (error) {
+    console.log('❌ خطا در دستور help:', error.message);
+  }
 });
 
 bot.command('status', async (ctx) => {
-  const access = checkOwnerAccess(ctx);
-  if (!access.hasAccess) {
-    return ctx.reply(access.message, {
-      reply_to_message_id: ctx.message.message_id
-    });
-  }
-  
-  const subgroups = await getActiveSubgroups();
-  
-  const message = `🤖 وضعیت ربات مدیریت Eclis
+  try {
+    console.log('📊 دستور /status دریافت شد');
+    const access = checkOwnerAccess(ctx);
+    if (!access.hasAccess) {
+      return ctx.reply(access.message, {
+        reply_to_message_id: ctx.message.message_id
+      });
+    }
+    
+    const subgroups = await getActiveSubgroups();
+    
+    const message = `🤖 وضعیت ربات مدیریت Eclis
 
 📊 آمار:
 • گروه‌های فعال: ${subgroups.length}
 • زمان فعالیت: ${Math.round(process.uptime() / 60)} دقیقه
+• آخرین پینگ: ${new Date().toLocaleTimeString('fa-IR')}
 
 ✅ ربات در حال اجرا است`;
 
-  await ctx.reply(message, {
-    reply_to_message_id: ctx.message.message_id
-  });
+    await ctx.reply(message, {
+      reply_to_message_id: ctx.message.message_id
+    });
+  } catch (error) {
+    console.log('❌ خطا در دستور status:', error.message);
+  }
 });
 
 bot.command('groups', async (ctx) => {
-  const access = checkOwnerAccess(ctx);
-  if (!access.hasAccess) {
-    return ctx.reply(access.message, {
+  try {
+    console.log('🏘️ دستور /groups دریافت شد');
+    const access = checkOwnerAccess(ctx);
+    if (!access.hasAccess) {
+      return ctx.reply(access.message, {
+        reply_to_message_id: ctx.message.message_id
+      });
+    }
+
+    const subgroups = await getActiveSubgroups();
+    
+    if (subgroups.length === 0) {
+      return ctx.reply('📭 هیچ گروه فعالی پیدا نشد', {
+        reply_to_message_id: ctx.message.message_id
+      });
+    }
+
+    let message = `🏘️ گروه‌های فعال (${subgroups.length}):\n\n`;
+    
+    subgroups.forEach((group, index) => {
+      message += `${index + 1}. ${group.chat_title} (${group.chat_type})\n`;
+      message += `   ID: ${group.chat_id}\n\n`;
+    });
+
+    await ctx.reply(message, {
       reply_to_message_id: ctx.message.message_id
     });
+  } catch (error) {
+    console.log('❌ خطا در دستور groups:', error.message);
   }
-
-  const subgroups = await getActiveSubgroups();
-  
-  if (subgroups.length === 0) {
-    return ctx.reply('📭 هیچ گروه فعالی پیدا نشد', {
-      reply_to_message_id: ctx.message.message_id
-    });
-  }
-
-  let message = `🏘️ گروه‌های فعال (${subgroups.length}):\n\n`;
-  
-  subgroups.forEach((group, index) => {
-    message += `${index + 1}. ${group.chat_title} (${group.chat_type})\n`;
-    message += `   ID: ${group.chat_id}\n\n`;
-  });
-
-  await ctx.reply(message, {
-    reply_to_message_id: ctx.message.message_id
-  });
 });
 
 // ==================[ دستور اصلی: بروزرسانی وضعیت چت‌ها ]==================
 bot.command('update_chats', async (ctx) => {
   try {
-    console.log('🔄 درخواست بروزرسانی وضعیت چت‌ها');
-    
+    console.log('🔄 دستور /update_chats دریافت شد');
     const access = checkOwnerAccess(ctx);
     if (!access.hasAccess) {
       return ctx.reply(access.message, {
@@ -1177,7 +1242,7 @@ bot.command('update_chats', async (ctx) => {
         await ctx.deleteMessage(tempMessage.message_id);
       } catch (e) {}
       await logActivity('update_chats_failed', { error: 'Discovery failed' }, ctx.from.id, ctx.chat.id);
-      return ctx.reply('❌ خطا در بروزرس��نی چت‌ها.', {
+      return ctx.reply('❌ خطا در بروزرسانی چت‌ها.', {
         reply_to_message_id: ctx.message.message_id
       });
     }
@@ -1223,6 +1288,7 @@ bot.command('update_chats', async (ctx) => {
 // ==================[ دستور اضافه کردن دستی چت ]==================
 bot.command('add_chat', async (ctx) => {
   try {
+    console.log('➕ دستور /add_chat دریافت شد');
     const access = checkOwnerAccess(ctx);
     if (!access.hasAccess) {
       return ctx.reply(access.message, {
@@ -1287,14 +1353,18 @@ bot.command('add_chat', async (ctx) => {
   }
 });
 
-// ==================[ راه‌اندازی ]==================
+// ==================[ راه‌اندازی ربات ]==================
 const startBot = async () => {
   try {
-    console.log('🤖 راه‌اندازی ربات...');
+    console.log('🤖 شروع راه‌اندازی ربات...');
     
+    // بررسی وضعیت ربات
     const botInfo = await bot.telegram.getMe();
     console.log(`✅ ربات ${botInfo.username} شناسایی شد`);
+    console.log(`🆔 ID ربات: ${botInfo.id}`);
+    console.log(`👤 نام ربات: ${botInfo.first_name}`);
     
+    // راه‌اندازی ربات با پولینگ
     await bot.launch({
       dropPendingUpdates: true,
       allowedUpdates: ['message', 'chat_member', 'my_chat_member', 'new_chat_members', 'callback_query'],
@@ -1305,10 +1375,26 @@ const startBot = async () => {
       }
     });
     
-    console.log('✅ ربات فعال شد');
+    console.log('✅ ربات با موفقیت فعال شد');
+    console.log('📝 ربات آماده دریافت دستورات است...');
+    
+    // اطلاع به مالک
+    try {
+      await bot.telegram.sendMessage(
+        OWNER_ID, 
+        `🤖 ربات ${botInfo.first_name} فعال شد\n\n` +
+        `⏰ زمان: ${new Date().toLocaleString('fa-IR')}\n` +
+        `🆔 ID: ${botInfo.id}\n` +
+        `👤 یوزرنیم: @${botInfo.username}\n\n` +
+        `✅ ربات آماده دریافت دستورات است`
+      );
+    } catch (error) {
+      console.log('⚠️ نتوانستم به مالک اطلاع دهم:', error.message);
+    }
     
   } catch (error) {
     console.log('❌ خطا در راه‌اندازی ربات:', error.message);
+    console.log('🔧 بررسی کنید که BOT_TOKEN صحیح باشد');
     process.exit(1);
   }
 };
@@ -1317,23 +1403,59 @@ const startBot = async () => {
 app.get('/', (req, res) => {
   res.json({ 
     status: '✅ ربات فعال است',
+    service: 'Eclis Management Bot',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    memory: process.memoryUsage(),
+    nodeVersion: process.version
+  });
+});
+
+app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'healthy',
+    service: 'Eclis Management Bot',
     timestamp: new Date().toISOString(),
     uptime: process.uptime()
   });
 });
 
+app.get('/ping', (req, res) => {
+  res.json({ 
+    message: 'pong',
+    timestamp: new Date().toISOString()
+  });
+});
+
+// ==================[ راه‌اندازی سرور ]==================
 app.listen(PORT, () => {
   console.log(`✅ سرور روی پورت ${PORT} راه‌اندازی شد`);
+  
+  // راه‌اندازی ربات
   startBot();
+  
+  // راه‌اندازی سیستم پینگ خودکار
+  startPingService();
 });
 
 // ==================[ مدیریت خاموشی ]==================
 process.once('SIGINT', () => {
   console.log('🛑 دریافت SIGINT - خاموش کردن ربات...');
   bot.stop('SIGINT');
+  process.exit(0);
 });
 
 process.once('SIGTERM', () => {
   console.log('🛑 دریافت SIGTERM - خاموش کردن ربات...');
   bot.stop('SIGTERM');
+  process.exit(0);
+});
+
+// هندل خطاهای catch نشده
+process.on('uncaughtException', (error) => {
+  console.log('❌ خطای catch نشده:', error);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.log('❌ Promise رد شده catch نشده:', reason);
 });
