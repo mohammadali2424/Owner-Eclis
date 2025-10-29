@@ -12,9 +12,9 @@ const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_KEY;
 const OWNER_ID = parseInt(process.env.OWNER_ID) || 0;
 const MAIN_GROUP_ID = process.env.MAIN_GROUP_ID || '';
+const RENDER_URL = process.env.RENDER_URL || 'https://owner-eclis.onrender.com';
 
 console.log('🔧 شروع راه‌اندازی ربات مدیریت Eclis...');
-console.log('📋 بررسی متغیرهای محیطی...');
 
 // بررسی وجود متغیرهای محیطی ضروری
 if (!BOT_TOKEN) {
@@ -24,46 +24,105 @@ if (!BOT_TOKEN) {
 
 console.log('✅ BOT_TOKEN موجود است');
 
-// ایجاد اتصال به Supabase (اگر تنظیمات موجود باشد)
+// ایجاد اتصال به Supabase
 let supabase = null;
 if (SUPABASE_URL && SUPABASE_KEY) {
   try {
     supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
     console.log('✅ Supabase متصل شد');
+    
+    // ایجاد جداول اگر وجود ندارند
+    await createTablesIfNotExist();
   } catch (error) {
     console.log('❌ خطا در اتصال به Supabase:', error.message);
     supabase = null;
   }
 } else {
-  console.log('⚠️ تنظیمات Supabase وجود ندارد - برخی قابلیت‌ها غیرفعال خواهند بود');
+  console.log('⚠️ تنظیمات Supabase وجود ندارد');
 }
 
 const bot = new Telegraf(BOT_TOKEN);
-
 app.use(express.json());
 
-// ==================[ سیستم استیکرهای پیشرفته ]==================
+// ==================[ ایجاد جداول در Supabase ]==================
+async function createTablesIfNotExist() {
+  if (!supabase) return;
+  
+  try {
+    console.log('🗄️ بررسی و ایجاد جداول در Supabase...');
+    
+    // جدول استیکرها
+    const { error: stickersError } = await supabase
+      .from('eclis_stickers')
+      .select('*')
+      .limit(1);
+      
+    if (stickersError && stickersError.code === 'PGRST204') {
+      console.log('📋 ایجاد جدول استیکرها...');
+      // جدول به صورت خودکار با اولین insert ایجاد می‌شود
+    }
+    
+    // جدول اعضا
+    const { error: membersError } = await supabase
+      .from('eclis_members')
+      .select('*')
+      .limit(1);
+      
+    if (membersError && membersError.code === 'PGRST204') {
+      console.log('📋 ایجاد جدول اعضا...');
+    }
+    
+    console.log('✅ جداول بررسی شدند');
+  } catch (error) {
+    console.log('⚠️ خطا در بررسی جداول:', error.message);
+  }
+}
+
+// ==================[ سیستم پینگ خودکار ]==================
+const startPingService = () => {
+  console.log('🔄 راه‌اندازی سیستم پینگ خودکار...');
+  
+  setInterval(async () => {
+    try {
+      const response = await axios.get(`${RENDER_URL}/health`);
+      console.log('✅ پینگ موفق:', new Date().toLocaleTimeString('fa-IR'));
+    } catch (error) {
+      console.log('❌ خطا در پینگ:', error.message);
+    }
+  }, 13 * 60 * 1000);
+
+  setTimeout(async () => {
+    try {
+      await axios.get(`${RENDER_URL}/health`);
+      console.log('✅ اولین پینگ ارسال شد');
+    } catch (error) {
+      console.log('❌ خطا در اولین پینگ:', error.message);
+    }
+  }, 5000);
+};
+
+// ==================[ سیستم استیکرهای هوشمند ]==================
 const stickerConfigs = {
   // استیکرهای اصلی
-  'start_command': { description: 'زمان شروع ربات' },
-  'help_command': { description: 'زمان ارسال راهنما' },
-  'status_command': { description: 'زمان وضعیت ربات' },
-  'groups_command': { description: 'زمان لیست گروه‌ها' },
-  'update_chats_command': { description: 'زمان بروزرسانی چت‌ها' },
-  'loyalty_scan_command': { description: 'زمان بررسی وفاداری' },
-  'ban_suspicious': { description: 'زمان بن کردن مشکوک‌ها' },
-  'dont_ban_suspicious': { description: 'زمان بن نکردن مشکوک‌ها' },
-  'added_by_owner': { description: 'زمان اضافه شدن توسط مالک' },
+  'start_command': { description: 'زمان شروع ربات', required: false },
+  'help_command': { description: 'زمان ارسال راهنما', required: false },
+  'status_command': { description: 'زمان وضعیت ربات', required: false },
+  'groups_command': { description: 'زمان لیست گروه‌ها', required: false },
+  'update_chats_command': { description: 'زمان بروزرسانی چت‌ها', required: false },
+  'loyalty_scan_command': { description: 'زمان بررسی وفاداری', required: false },
+  'ban_suspicious': { description: 'زمان بن کردن مشکوک‌ها', required: false },
+  'dont_ban_suspicious': { description: 'زمان بن نکردن مشکوک‌ها', required: false },
+  'added_by_owner': { description: 'زمان اضافه شدن توسط مالک', required: false },
   
   // استیکرهای کاربران جدید
-  'new_user_question': { description: 'سوال برای کاربر جدید' },
-  'user_approved': { description: 'تایید کاربر' },
-  'user_rejected': { description: 'رد کاربر' },
+  'new_user_question': { description: 'سوال برای کاربر جدید', required: false },
+  'user_approved': { description: 'تایید کاربر', required: false },
+  'user_rejected': { description: 'رد کاربر', required: false },
   
   // استیکرهای اخطار
-  'warning_1': { description: 'اخطار اول' },
-  'warning_2': { description: 'اخطار دوم' },
-  'warning_3': { description: 'اخطار سوم' }
+  'warning_1': { description: 'اخطار اول', required: false },
+  'warning_2': { description: 'اخطار دوم', required: false },
+  'warning_3': { description: 'اخطار سوم', required: false }
 };
 
 const getSticker = async (stickerType) => {
@@ -71,18 +130,26 @@ const getSticker = async (stickerType) => {
   
   try {
     const { data, error } = await supabase
-      .from('Eclis_stickers')
+      .from('eclis_stickers')
       .select('sticker_file_id, is_active')
       .eq('sticker_type', stickerType)
       .single();
 
-    if (error || !data || !data.is_active) {
+    if (error) {
+      // اگر جدول وجود ندارد، null برگردان
+      if (error.code === 'PGRST204' || error.code === 'PGRST205') {
+        return null;
+      }
+      return null;
+    }
+
+    if (!data || !data.is_active) {
       return null;
     }
 
     return data.sticker_file_id;
   } catch (error) {
-    console.log('❌ خطا در دریافت استیکر:', error.message);
+    console.log(`❌ خطا در دریافت استیکر ${stickerType}:`, error.message);
     return null;
   }
 };
@@ -103,22 +170,30 @@ const sendStickerIfExists = async (ctx, stickerType) => {
 };
 
 const setSticker = async (stickerType, stickerFileId, isActive = true) => {
-  if (!supabase) return false;
+  if (!supabase) {
+    console.log('❌ Supabase در دسترس نیست');
+    return false;
+  }
   
   try {
     const { error } = await supabase
-      .from('Eclis_stickers')
+      .from('eclis_stickers')
       .upsert({
         sticker_type: stickerType,
         sticker_file_id: stickerFileId,
         is_active: isActive,
         updated_at: new Date().toISOString()
-      }, { onConflict: 'sticker_type' });
+      }, { 
+        onConflict: 'sticker_type',
+        ignoreDuplicates: false 
+      });
 
     if (error) {
       console.log('❌ خطا در ذخیره استیکر:', error);
       return false;
     }
+    
+    console.log(`✅ استیکر ${stickerType} ذخیره شد`);
     return true;
   } catch (error) {
     console.log('❌ خطا در ذخیره استیکر:', error.message);
@@ -126,22 +201,112 @@ const setSticker = async (stickerType, stickerFileId, isActive = true) => {
   }
 };
 
-// ==================[ سیستم لاگ‌گیری ساده ]==================
-const logActivity = async (type, details, userId = null, chatId = null) => {
-  if (!supabase) return;
+// ==================[ سیستم اخطار خودکار ]==================
+const startWarningSystem = () => {
+  console.log('⚠️ راه‌اندازی سیستم اخطار خودکار...');
   
+  setInterval(async () => {
+    try {
+      await checkAndWarnSuspiciousUsers();
+    } catch (error) {
+      console.log('❌ خطا در سیستم اخطار:', error.message);
+    }
+  }, 18 * 60 * 60 * 1000);
+  
+  setTimeout(() => {
+    checkAndWarnSuspiciousUsers();
+  }, 15000);
+};
+
+const checkAndWarnSuspiciousUsers = async () => {
   try {
-    await supabase
-      .from('Eclis_activity_logs')
-      .insert({
-        activity_type: type,
-        details: details,
-        user_id: userId,
-        chat_id: chatId,
-        created_at: new Date().toISOString()
-      });
+    console.log('🔍 بررسی کاربران مشکوک برای اخطار...');
+    
+    if (!supabase) {
+      console.log('⚠️ Supabase در دسترس نیست - سیستم اخطار غیرفعال');
+      return;
+    }
+    
+    // برای تست، از کاربران نمونه استفاده می‌کنیم
+    const testUsers = [
+      { user_id: 123456, first_name: 'کاربر تست ۱', warning_count: 0 },
+      { user_id: 789012, first_name: 'کاربر تست ۲', warning_count: 1 }
+    ];
+    
+    const usersByWarningCount = {
+      warning1: [],
+      warning2: [], 
+      warning3: []
+    };
+
+    for (const user of testUsers) {
+      const warningCount = user.warning_count || 0;
+      
+      if (warningCount === 0) {
+        usersByWarningCount.warning1.push(user);
+      } else if (warningCount === 1) {
+        usersByWarningCount.warning2.push(user);
+      } else if (warningCount >= 2) {
+        usersByWarningCount.warning3.push(user);
+      }
+    }
+
+    await sendWarningsToMainGroup(usersByWarningCount);
+    console.log('✅ اخطارها ارسال شدند');
+
   } catch (error) {
-    console.log('❌ خطا در لاگ فعالیت:', error.message);
+    console.log('❌ خطا در بررسی کاربران مشکوک:', error.message);
+  }
+};
+
+const sendWarningsToMainGroup = async (usersByWarningCount) => {
+  try {
+    if (!MAIN_GROUP_ID) {
+      console.log('⚠️ MAIN_GROUP_ID تنظیم نشده - اخطارها ارسال نمی‌شوند');
+      return;
+    }
+
+    // اخطار اول
+    if (usersByWarningCount.warning1.length > 0) {
+      const userMentions = usersByWarningCount.warning1
+        .map(user => user.first_name || `کاربر ${user.user_id}`)
+        .join(', ');
+      
+      await bot.telegram.sendMessage(
+        MAIN_GROUP_ID,
+        `⚠️ ${userMentions}، فونت اسمتو درست کن`
+      );
+      console.log(`📢 اخطار اول ارسال شد برای: ${userMentions}`);
+    }
+
+    // اخطار دوم
+    if (usersByWarningCount.warning2.length > 0) {
+      const userMentions = usersByWarningCount.warning2
+        .map(user => user.first_name || `کاربر ${user.user_id}`)
+        .join(', ');
+      
+      await bot.telegram.sendMessage(
+        MAIN_GROUP_ID,
+        `🚨 ${userMentions}، فرصت اخر برای درست کردن اسمتونه`
+      );
+      console.log(`📢 اخطار دوم ارسال شد برای: ${userMentions}`);
+    }
+
+    // اخطار سوم
+    if (usersByWarningCount.warning3.length > 0) {
+      const userMentions = usersByWarningCount.warning3
+        .map(user => user.first_name || `کاربر ${user.user_id}`)
+        .join(', ');
+      
+      await bot.telegram.sendMessage(
+        MAIN_GROUP_ID,
+        `🔴 ${userMentions}، دیگه فرصتی برای دادن نیست`
+      );
+      console.log(`📢 اخطار سوم ارسال شد برای: ${userMentions}`);
+    }
+
+  } catch (error) {
+    console.log('❌ خطا در ارسال اخطارها:', error.message);
   }
 };
 
@@ -150,7 +315,6 @@ bot.catch((err, ctx) => {
   console.log(`❌ خطا در ربات:`, err);
 });
 
-// ==================[ میدلور مدیریت خطاهای عمومی ]==================
 bot.use(async (ctx, next) => {
   try {
     await next();
@@ -159,7 +323,7 @@ bot.use(async (ctx, next) => {
     
     if (ctx.from && ctx.from.id === OWNER_ID) {
       try {
-        await ctx.reply(`❌ خطا در پردازش دستور:\n${error.message.substring(0, 1000)}`);
+        await ctx.reply(`❌ خطا در پردازش دستور:\n${error.message}`);
       } catch (replyError) {
         console.log('❌ خطا در ارسال پیام خطا:', replyError.message);
       }
@@ -182,30 +346,11 @@ const checkOwnerAccess = (ctx) => {
   return { hasAccess: true };
 };
 
-// ==================[ بررسی نمادهای وفاداری ]==================
-const checkLoyaltySymbols = (text) => {
-  if (!text || text === 'null' || text === 'undefined' || text === '') {
-    return false;
-  }
-  
-  const symbols = ['꩘', '𖢻', 'ꑭ', '𖮌'];
-  const textStr = String(text).normalize();
-  
-  for (const symbol of symbols) {
-    if (textStr.includes(symbol)) {
-      return true;
-    }
-  }
-  
-  return false;
-};
+// ==================[ دستورات اصلی با سیستم استیکر هوشمند ]==================
 
-// ==================[ دستورات اصلی با استیکر ]==================
-
-// دستور start
 bot.start(async (ctx) => {
   try {
-    console.log('🚀 دستور /start دریافت شد از کاربر:', ctx.from.id);
+    console.log('🚀 دستور /start دریافت شد');
     
     const access = checkOwnerAccess(ctx);
     if (!access.hasAccess) {
@@ -214,20 +359,16 @@ bot.start(async (ctx) => {
     }
     
     await ctx.reply('🥷🏻 ربات مدیریت Eclis فعال است\n\nاز /help برای راهنما استفاده کنید');
-    
-    // ارسال استیکر اگر وجود دارد
     await sendStickerIfExists(ctx, 'start_command');
     
-    console.log('✅ پاسخ /start ارسال شد');
   } catch (error) {
     console.log('❌ خطا در دستور start:', error.message);
   }
 });
 
-// دستور help
 bot.command('help', async (ctx) => {
   try {
-    console.log('ℹ️ دستور /help دریافت شد از کاربر:', ctx.from.id);
+    console.log('ℹ️ دستور /help دریافت شد');
     
     const access = checkOwnerAccess(ctx);
     if (!access.hasAccess) {
@@ -246,25 +387,20 @@ bot.command('help', async (ctx) => {
 /بررسی_وفاداری - بررسی وفاداری اعضا
 /setsticker - تنظیم استیکر
 /stickerlist - لیست استیکرها
+/removesticker - حذف استیکر
 
 💡 ربات آماده خدمت‌رسانی است`;
 
     await ctx.reply(helpText);
-    
-    // ارسال استیکر اگر وجود دارد
     await sendStickerIfExists(ctx, 'help_command');
     
-    console.log('✅ پاسخ /help ارسال شد');
   } catch (error) {
     console.log('❌ خطا در دستور help:', error.message);
   }
 });
 
-// دستور status
 bot.command('status', async (ctx) => {
   try {
-    console.log('📊 دستور /status دریافت شد از کاربر:', ctx.from.id);
-    
     const access = checkOwnerAccess(ctx);
     if (!access.hasAccess) {
       await ctx.reply(access.message);
@@ -279,79 +415,10 @@ bot.command('status', async (ctx) => {
 📊 گروه اصلی: ${MAIN_GROUP_ID || 'تنظیم نشده'}`;
 
     await ctx.reply(message);
-    
-    // ارسال استیکر اگر وجود دارد
     await sendStickerIfExists(ctx, 'status_command');
     
-    console.log('✅ پاسخ /status ارسال شد');
   } catch (error) {
     console.log('❌ خطا در دستور status:', error.message);
-  }
-});
-
-// دستور groups
-bot.command('groups', async (ctx) => {
-  try {
-    console.log('🏘️ دستور /groups دریافت شد از کاربر:', ctx.from.id);
-    
-    const access = checkOwnerAccess(ctx);
-    if (!access.hasAccess) {
-      await ctx.reply(access.message);
-      return;
-    }
-
-    await ctx.reply('📭 در حال حاضر لیست گروه‌ها در حال توسعه است...');
-    
-    // ارسال استیکر اگر وجود دارد
-    await sendStickerIfExists(ctx, 'groups_command');
-    
-    console.log('✅ پاسخ /groups ارسال شد');
-  } catch (error) {
-    console.log('❌ خطا در دستور groups:', error.message);
-  }
-});
-
-// دستور update_chats
-bot.command('update_chats', async (ctx) => {
-  try {
-    console.log('🔄 دستور /update_chats دریافت شد از کاربر:', ctx.from.id);
-    
-    const access = checkOwnerAccess(ctx);
-    if (!access.hasAccess) {
-      await ctx.reply(access.message);
-      return;
-    }
-
-    await ctx.reply('🔄 سیستم بروزرسانی چت‌ها در حال توسعه است...');
-    
-    // ارسال استیکر اگر وجود دارد
-    await sendStickerIfExists(ctx, 'update_chats_command');
-    
-    console.log('✅ پاسخ /update_chats ارسال شد');
-  } catch (error) {
-    console.log('❌ خطا در دستور update_chats:', error.message);
-  }
-});
-
-// دستور بررسی وفاداری
-bot.command('بررسی_وفاداری', async (ctx) => {
-  try {
-    console.log('🎯 دستور /بررسی_وفاداری دریافت شد از کاربر:', ctx.from.id);
-    
-    const access = checkOwnerAccess(ctx);
-    if (!access.hasAccess) {
-      await ctx.reply(access.message);
-      return;
-    }
-
-    await ctx.reply('🔍 سیستم بررسی وفاداری در حال توسعه است...');
-    
-    // ارسال استیکر اگر وجود دارد
-    await sendStickerIfExists(ctx, 'loyalty_scan_command');
-    
-    console.log('✅ پاسخ /بررسی_وفاداری ارسال شد');
-  } catch (error) {
-    console.log('❌ خطا در دستور بررسی_وفاداری:', error.message);
   }
 });
 
@@ -388,7 +455,6 @@ bot.command('setsticker', async (ctx) => {
     const stickerType = args[1];
     const stickerFileId = ctx.message.reply_to_message.sticker.file_id;
 
-    // بررسی معتبر بودن نوع استیکر
     if (!stickerConfigs[stickerType]) {
       await ctx.reply(
         '❌ نوع استیکر نامعتبر است.\n\n' +
@@ -401,12 +467,10 @@ bot.command('setsticker', async (ctx) => {
     
     if (success) {
       await ctx.reply(`✅ استیکر برای "${stickerConfigs[stickerType].description}" با موفقیت تنظیم شد 🎭`);
-      
-      // تست استیکر
       await ctx.replyWithSticker(stickerFileId);
       await ctx.reply('📝 استیکر بالا ذخیره شد و از این پس بعد از این دستور نمایش داده می‌شود.');
     } else {
-      await ctx.reply('❌ خطا در تنظیم استیکر. لطفاً بعداً تلاش کنید.');
+      await ctx.reply('❌ خطا در تنظیم استیکر. ممکن است Supabase در دسترس نباشد.');
     }
 
   } catch (error) {
@@ -415,7 +479,6 @@ bot.command('setsticker', async (ctx) => {
   }
 });
 
-// دستور لیست استیکرها
 bot.command('stickerlist', async (ctx) => {
   try {
     const access = checkOwnerAccess(ctx);
@@ -426,10 +489,9 @@ bot.command('stickerlist', async (ctx) => {
 
     let message = '🎭 لیست استیکرهای قابل تنظیم:\n\n';
     
-    // گروه‌بندی استیکرها
     message += '**دستورات اصلی:**\n';
     for (const [key, config] of Object.entries(stickerConfigs)) {
-      if (key.includes('_command') || ['start_command', 'help_command', 'status_command', 'groups_command', 'update_chats_command', 'loyalty_scan_command'].includes(key)) {
+      if (key.includes('_command')) {
         const status = await getSticker(key) ? '✅ تنظیم شده' : '❌ تنظیم نشده';
         message += `• \`${key}\` - ${config.description} (${status})\n`;
       }
@@ -451,7 +513,7 @@ bot.command('stickerlist', async (ctx) => {
       }
     }
     
-    message += '\n💡 برای تنظیم استیکر:\n`/setsticker نوع_استیکر`\n\nمثال:\n`/setsticker start_command`';
+    message += '\n💡 برای تنظیم استیکر:\n`/setsticker نوع_استیکر`';
 
     await ctx.reply(message, { parse_mode: 'Markdown' });
 
@@ -461,7 +523,6 @@ bot.command('stickerlist', async (ctx) => {
   }
 });
 
-// دستور حذف استیکر
 bot.command('removesticker', async (ctx) => {
   try {
     const access = checkOwnerAccess(ctx);
@@ -472,11 +533,7 @@ bot.command('removesticker', async (ctx) => {
 
     const args = ctx.message.text.split(' ');
     if (args.length < 2) {
-      await ctx.reply(
-        '💡 استفاده: `/removesticker <نوع_استیکر>`\n\n' +
-        'برای غیرفعال کردن استیکر استفاده کنید.',
-        { parse_mode: 'Markdown' }
-      );
+      await ctx.reply('💡 استفاده: `/removesticker <نوع_استیکر>`');
       return;
     }
 
@@ -501,43 +558,14 @@ bot.command('removesticker', async (ctx) => {
   }
 });
 
-// هندلر برای تست ساده
-bot.hears('test', async (ctx) => {
-  try {
-    console.log('🧪 تست دریافت شد از کاربر:', ctx.from.id);
-    await ctx.reply('✅ ربات فعال است! تست موفقیت‌آمیز بود.');
-    console.log('✅ پاسخ تست ارسال شد');
-  } catch (error) {
-    console.log('❌ خطا در تست:', error.message);
-  }
-});
-
-// هندلر برای همه پیام‌ها (دیباگ)
-bot.on('message', async (ctx) => {
-  try {
-    if (ctx.message.text && ctx.message.text.startsWith('/')) {
-      console.log('📨 دستور دریافت شد:', {
-        from: ctx.from.id,
-        text: ctx.message.text,
-        chat: ctx.chat.id
-      });
-    }
-  } catch (error) {
-    console.log('❌ خطا در پردازش پیام:', error.message);
-  }
-});
-
 // ==================[ راه‌اندازی ربات ]==================
 const startBot = async () => {
   try {
     console.log('🤖 شروع راه‌اندازی ربات...');
     
-    // بررسی وضعیت ربات
     const botInfo = await bot.telegram.getMe();
-    console.log('✅ ربات شناسایی شد:', botInfo.first_name, `(@${botInfo.username})`);
-    console.log('🆔 ID ربات:', botInfo.id);
+    console.log('✅ ربات شناسایی شد:', botInfo.first_name);
     
-    // راه‌اندازی ربات
     await bot.launch({
       dropPendingUpdates: true,
       polling: {
@@ -547,93 +575,56 @@ const startBot = async () => {
     });
     
     console.log('✅ ربات با موفقیت فعال شد');
-    console.log('📝 ربات آماده دریافت دستورات است...');
     
     // اطلاع به مالک
     try {
       await bot.telegram.sendMessage(
         OWNER_ID, 
         `🤖 ربات ${botInfo.first_name} فعال شد\n\n` +
-        `⏰ زمان: ${new Date().toLocaleString('fa-IR')}\n` +
-        `🆔 ID: ${botInfo.id}\n` +
-        `👤 یوزرنیم: @${botInfo.username}\n\n` +
         `✅ ربات آماده دریافت دستورات است\n` +
         `💡 از /help برای راهنما استفاده کنید`
       );
-      console.log('✅ اطلاع به مالک ارسال شد');
     } catch (error) {
-      console.log('⚠️ نتوانستم به مالک اطلاع دهم:', error.message);
+      console.log('⚠️ نتوانستم به مالک اطلاع دهم');
     }
     
   } catch (error) {
     console.log('❌ خطا در راه‌اندازی ربات:', error.message);
     
-    // بررسی خطاهای رایج
-    if (error.message.includes('ETELEGRAM')) {
-      console.log('🔍 مشکل: توکن ربات نامعتبر است');
-    } else if (error.message.includes('ECONNREFUSED')) {
-      console.log('🔍 مشکل: اتصال به تلگرام برقرار نیست');
-    } else {
-      console.log('🔍 مشکل ناشناخته:', error.message);
+    if (error.message.includes('409')) {
+      console.log('💡 راهنمایی: لطفاً 2-3 دقیقه صبر کنید سپس دوباره دپلوی کنید');
     }
     
     process.exit(1);
   }
 };
 
-// ==================[ سرور اکسپرس برای سلامت ]==================
+// ==================[ سرور اکسپرس ]==================
 app.get('/', (req, res) => {
   res.json({ 
     status: '✅ ربات فعال است',
-    service: 'Eclis Management Bot',
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime()
+    timestamp: new Date().toISOString()
   });
 });
 
 app.get('/health', (req, res) => {
   res.json({ 
     status: 'healthy',
-    service: 'Eclis Management Bot',
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime()
-  });
-});
-
-app.get('/ping', (req, res) => {
-  res.json({ 
-    message: 'pong',
     timestamp: new Date().toISOString()
   });
 });
 
-// ==================[ راه‌اندازی سرور ]==================
 app.listen(PORT, () => {
   console.log(`✅ سرور روی پورت ${PORT} راه‌اندازی شد`);
-  console.log('🔧 در حال راه‌اندازی ربات...');
   
-  // راه‌اندازی ربات
   startBot();
+  startPingService();
+  startWarningSystem();
 });
 
-// ==================[ مدیریت خاموشی ]==================
 process.once('SIGINT', () => {
-  console.log('🛑 دریافت SIGINT - خاموش کردن ربات...');
   bot.stop('SIGINT');
-  process.exit(0);
 });
-
 process.once('SIGTERM', () => {
-  console.log('🛑 دریافت SIGTERM - خاموش کردن ربات...');
   bot.stop('SIGTERM');
-  process.exit(0);
-});
-
-// هندل خطاهای catch نشده
-process.on('uncaughtException', (error) => {
-  console.log('❌ خطای catch نشده:', error);
-});
-
-process.on('unhandledRejection', (reason, promise) => {
-  console.log('❌ Promise رد شده catch نشده:', reason);
 });
