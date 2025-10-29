@@ -58,7 +58,8 @@ try {
       return false;
     }
     
-    const symbols = ['꩘', '𖢻', 'ꑭ', '𖮌'];
+    // سمبل‌های وفاداری
+    const symbols = ['꩘', '𖮌', 'ꑭ', '𖢻'];
     const textStr = String(text).normalize();
     
     for (const symbol of symbols) {
@@ -68,6 +69,57 @@ try {
     }
     
     return false;
+  };
+
+  // ==================[ سیستم استیکرها ]==================
+  const getSticker = async (stickerType) => {
+    try {
+      const { data, error } = await supabase
+        .from('eclis_stickers')
+        .select('sticker_file_id, is_active')
+        .eq('sticker_type', stickerType)
+        .single();
+
+      if (error || !data || !data.is_active) {
+        return null;
+      }
+
+      return data.sticker_file_id;
+    } catch (error) {
+      console.log('❌ خطا در دریافت استیکر:', error.message);
+      return null;
+    }
+  };
+
+  const sendStickerIfExists = async (ctx, stickerType) => {
+    try {
+      const stickerId = await getSticker(stickerType);
+      if (stickerId) {
+        await ctx.replyWithSticker(stickerId);
+        console.log(`🎭 استیکر ${stickerType} ارسال شد`);
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.log(`❌ خطا در ارسال استیکر ${stickerType}:`, error.message);
+      return false;
+    }
+  };
+
+  // تابع برای ارسال استیکر بدون context
+  const sendStickerToChat = async (chatId, stickerType) => {
+    try {
+      const stickerId = await getSticker(stickerType);
+      if (stickerId) {
+        await bot.telegram.sendSticker(chatId, stickerId);
+        console.log(`🎭 استیکر ${stickerType} به چت ${chatId} ارسال شد`);
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.log(`❌ خطا در ارسال استیکر ${stickerType} به چت ${chatId}:`, error.message);
+      return false;
+    }
   };
 
   // ==================[ دستورات اصلی - فارسی ]==================
@@ -81,6 +133,7 @@ try {
       }
       
       await ctx.reply('🥷🏻 ربات مدیریت Eclis فعال است\n\nاز "راهنما" برای کمک استفاده کنید');
+      await sendStickerIfExists(ctx, 'start_command');
     } catch (error) {
       console.log('❌ خطا در دستور شروع:', error.message);
     }
@@ -100,7 +153,7 @@ try {
 "شروع" - شروع ربات
 "راهنما" - این راهنما
 "وضعیت" - وضعیت ربات
-"وضعیت گروه ها" - لیست گروه‌ها
+"وضعیت گروه ها" - لیس�� گروه‌ها
 "بررسی وفاداری" - بررسی وفاداری اعضا
 "تنظیم استیکر" - تنظیم استیکر
 "لیست استیکرها" - لیست استیکرها
@@ -108,6 +161,7 @@ try {
 💡 ربات آماده خدمت‌رسانی است`;
 
       await ctx.reply(helpText);
+      await sendStickerIfExists(ctx, 'help_command');
     } catch (error) {
       console.log('❌ خطا در دستور راهنما:', error.message);
     }
@@ -133,6 +187,7 @@ try {
 ✅ ربات در حال اجرا است`;
 
       await ctx.reply(message);
+      await sendStickerIfExists(ctx, 'status_command');
     } catch (error) {
       console.log('❌ خطا در دستور وضعیت:', error.message);
     }
@@ -160,6 +215,7 @@ try {
       });
 
       await ctx.reply(message);
+      await sendStickerIfExists(ctx, 'groups_command');
     } catch (error) {
       console.log('❌ خطا در دستور وضعیت گروه‌ها:', error.message);
     }
@@ -172,6 +228,9 @@ try {
         await ctx.reply('من فقط از اربابم پیروی میکنم 🥷🏻');
         return;
       }
+
+      // ارسال استیکر بررسی وفاداری
+      await sendStickerIfExists(ctx, 'loyalty_scan_command');
 
       const tempMessage = await ctx.reply('🔍 در حال بررسی وفاداری اعضا... این ممکن است چند دقیقه طول بکشد.');
 
@@ -192,7 +251,18 @@ try {
       message += `• کل اعضای اسکن شده: ${totalScanned}\n`;
       message += `• اعضای وفادار: ${loyalMembers} 👑\n`;
       message += `• اعضای مشکوک: ${suspiciousMembers} ⚠️\n\n`;
+
+      // اگر کاربر مشکوکی وجود ندارد
+      if (suspiciousMembers === 0) {
+        try {
+          await ctx.deleteMessage(tempMessage.message_id);
+        } catch (e) {}
+        message += `✅ هیچ عضو مشکوکی پیدا نشد! همه وفادار هستند.`;
+        await ctx.reply(message);
+        return;
+      }
       
+      // اگر کاربر مشکوک وجود دا��د
       message += `آیا میخوای تمام اعضای مشکوک توی Eclis رو بکشم ؟`;
 
       try {
@@ -203,7 +273,7 @@ try {
         reply_markup: {
           inline_keyboard: [
             [
-              { text: 'آره ، همشون رو بکش', callback_data: 'ban_suspicious' },
+              { text: '🥷 بکششون', callback_data: 'ban_suspicious' },
               { text: 'نه ، نکششون', callback_data: 'dont_ban_suspicious' }
             ]
           ]
@@ -253,14 +323,20 @@ try {
         'groups_command': 'لیست گروه‌ها',
         'loyalty_scan_command': 'بررسی وفاداری',
         'ban_suspicious': 'بن کردن مشکوک‌ها',
+        'dont_ban_suspicious': 'بن نکردن مشکوک‌ها',
         'user_approved': 'تایید کاربر',
-        'user_rejected': 'رد کاربر'
+        'user_rejected': 'رد کاربر',
+        'warning_1': 'اخطار اول',
+        'warning_2': 'اخطار دوم', 
+        'warning_3': 'اخطار سوم'
       };
 
       let message = '🎭 لیست استیکرهای قابل تنظیم:\n\n';
       
       for (const [key, description] of Object.entries(stickerConfigs)) {
-        message += `• ${key} - ${description}\n`;
+        const hasSticker = await getSticker(key);
+        const status = hasSticker ? '✅' : '❌';
+        message += `${status} ${key} - ${description}\n`;
       }
       
       message += '\n💡 برای تنظیم استیکر:\n"تنظیم استیکر نوع_استیکر"';
@@ -276,6 +352,10 @@ try {
   // تست ربات
   bot.hears(['تست', 'test', '/test'], async (ctx) => {
     try {
+      if (!isOwner(ctx.from.id)) {
+        await ctx.reply('من فقط از اربابم پیروی میکنم 🥷🏻');
+        return;
+      }
       await ctx.reply('✅ ربات پاسخ می‌دهد! همه چیز درست کار می‌کند.');
     } catch (error) {
       console.log('❌ خطا در دستور تست:', error.message);
@@ -485,6 +565,9 @@ try {
         `📊 تعداد بن شده: ${bannedCount}`
       );
 
+      // ارسال استیکر بن کردن
+      await sendStickerToChat(ctx.chat.id, 'ban_suspicious');
+
     } catch (error) {
       console.log('❌ خطا در بن کردن اعضای مشکوک:', error.message);
       await ctx.answerCbQuery('خطا در بن کردن اعضای مشکوک');
@@ -500,6 +583,9 @@ try {
 
       await ctx.answerCbQuery('اعضای مشکوک بن نشدند');
       await ctx.editMessageText('🔄 فرصتی دوباره...\n\nاعضای مشکوک میتونن تا دفعه بعدی زنده بمونن');
+
+      // ارسال استیکر بن نکردن
+      await sendStickerToChat(ctx.chat.id, 'dont_ban_suspicious');
 
     } catch (error) {
       console.log('❌ خطا در عمل عدم بن:', error.message);
@@ -597,4 +683,4 @@ try {
 } catch (error) {
   console.log('❌ خطا در راه‌اندازی اولیه:', error.message);
   process.exit(1);
-}
+          }
