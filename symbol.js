@@ -1,33 +1,4 @@
-const { Telegraf, Markup } = require('telegraf');
-const { createClient } = require('@supabase/supabase-js');
-
-// ==================[ تنظیمات ]==================
-const BOT_TOKEN = process.env.BOT_TOKEN;
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_KEY = process.env.SUPABASE_KEY;
-const OWNER_ID = parseInt(process.env.OWNER_ID) || 0;
-
-if (!BOT_TOKEN || !SUPABASE_URL || !SUPABASE_KEY) {
-  console.log('❌ تنظیمات ضروری وجود ندارد');
-  process.exit(1);
-}
-
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
-const bot = new Telegraf(BOT_TOKEN);
-
-// ==================[ بررسی مالکیت ]==================
-const checkOwnerAccess = (ctx) => {
-  const userId = ctx.from?.id;
-  if (!userId) {
-    return { hasAccess: false, message: 'کاربر شناسایی نشد' };
-  }
-  
-  if (userId !== OWNER_ID) {
-    return { hasAccess: false, message: 'من فقط از اربابم پیروی میکنم' };
-  }
-  
-  return { hasAccess: true };
-};
+const { Markup } = require('telegraf');
 
 // ==================[ بررسی نمادهای وفاداری ]==================
 const checkLoyaltySymbols = (text) => {
@@ -48,45 +19,8 @@ const checkLoyaltySymbols = (text) => {
   return symbolRegex.test(textStr);
 };
 
-// ==================[ دریافت استیکر ]==================
-const getSticker = async (stickerType) => {
-  try {
-    const { data, error } = await supabase
-      .from('eclis_stickers')
-      .select('sticker_id')
-      .eq('sticker_type', stickerType)
-      .single();
-
-    if (error || !data) return null;
-    return data.sticker_id;
-  } catch (error) {
-    console.log('❌ خطا در دریافت استیکر:', error.message);
-    return null;
-  }
-};
-
-// ==================[ دریافت گروه‌های فعال ]==================
-const getActiveSubgroups = async () => {
-  try {
-    const { data, error } = await supabase
-      .from('eclis_subgroups')
-      .select('chat_id, chat_title, chat_type')
-      .eq('is_active', true);
-
-    if (error) {
-      console.log('❌ خطا در دریافت زیرگروه‌ها:', error);
-      return [];
-    }
-
-    return data || [];
-  } catch (error) {
-    console.log('❌ خطا در دریافت زیرگروه‌ها:', error.message);
-    return [];
-  }
-};
-
 // ==================[ اسکن اعضای چت‌ها برای وفاداری ]==================
-const scanAllSubgroupsMembers = async (ctx) => {
+const scanAllSubgroupsMembers = async (ctx, bot, supabase, getActiveSubgroups) => {
   try {
     console.log('🔍 شروع اسکن اعضای چت‌ها برای وفاداری...');
     
@@ -103,7 +37,7 @@ const scanAllSubgroupsMembers = async (ctx) => {
         console.log(`🔍 اسکن ${subgroup.chat_type}: ${subgroup.chat_title}`);
         
         // دریافت ادمین‌های چت
-        const admins = await ctx.telegram.getChatAdministrators(subgroup.chat_id);
+        const admins = await bot.telegram.getChatAdministrators(subgroup.chat_id);
         const adminIds = admins.map(admin => admin.user.id);
         
         let members = [];
@@ -179,7 +113,7 @@ const scanAllSubgroupsMembers = async (ctx) => {
 };
 
 // ==================[ بن کردن کاربران مشکوک ]==================
-const banSuspiciousMembers = async (ctx, suspiciousList) => {
+const banSuspiciousMembers = async (ctx, bot, supabase, suspiciousList, getActiveSubgroups) => {
   try {
     let bannedCount = 0;
     const subgroups = await getActiveSubgroups();
@@ -188,10 +122,10 @@ const banSuspiciousMembers = async (ctx, suspiciousList) => {
       for (const subgroup of subgroups) {
         try {
           // بررسی اینکه کاربر در این چت عضو هست یا نه
-          const chatMember = await ctx.telegram.getChatMember(subgroup.chat_id, member.user_id);
+          const chatMember = await bot.telegram.getChatMember(subgroup.chat_id, member.user_id);
           if (chatMember.status !== 'left' && chatMember.status !== 'kicked') {
             // بن کردن کاربر
-            await ctx.telegram.banChatMember(subgroup.chat_id, member.user_id);
+            await bot.telegram.banChatMember(subgroup.chat_id, member.user_id);
             bannedCount++;
             console.log(`🚫 کاربر ${member.first_name} از ${subgroup.chat_title} بن شد`);
             
@@ -211,29 +145,23 @@ const banSuspiciousMembers = async (ctx, suspiciousList) => {
   }
 };
 
-// ==================[ دستور بررسی وفاداری ]==================
-bot.command('بررسی_وفاداری', async (ctx) => {
+// ==================[ هندلر بررسی وفاداری ]==================
+const handleLoyaltyCheck = async (ctx, bot, supabase, getSticker, getActiveSubgroups) => {
   try {
-    const access = checkOwnerAccess(ctx);
-    if (!access.hasAccess) {
-      return ctx.reply('من فقط از اربابم پیروی میکنم', {
-        reply_to_message_id: ctx.message?.message_id
-      });
-    }
-
     const tempMessage = await ctx.reply('🔍 در حال بررسی وفاداری اعضا... این ممکن است چند دقیقه طول بکشد.', {
       reply_to_message_id: ctx.message.message_id
     });
 
-    const scanResult = await scanAllSubgroupsMembers(ctx);
+    const scanResult = await scanAllSubgroupsMembers(ctx, bot, supabase, getActiveSubgroups);
     
     if (!scanResult.success) {
       try {
         await ctx.deleteMessage(tempMessage.message_id);
       } catch (e) {}
-      return ctx.reply('❌ خطا در بررسی وفاداری اعضا.', {
+      await ctx.reply('❌ خطا در بررسی وفاداری اعضا.', {
         reply_to_message_id: ctx.message.message_id
       });
+      return;
     }
 
     const { totalScanned, loyalMembers, suspiciousMembers } = scanResult;
@@ -272,28 +200,22 @@ bot.command('بررسی_وفاداری', async (ctx) => {
       reply_to_message_id: ctx.message.message_id
     });
   }
-});
+};
 
 // ==================[ هندلر بن کردن کاربران مشکوک ]==================
-bot.action('ban_suspicious', async (ctx) => {
+const handleBanSuspicious = async (ctx, bot, supabase, getSticker, getActiveSubgroups) => {
   try {
-    const access = checkOwnerAccess(ctx);
-    if (!access.hasAccess) {
-      await ctx.answerCbQuery('فقط آکی میتونه این کار رو بکنه!');
-      return;
-    }
-
     await ctx.answerCbQuery('در حال بن کردن اعضای مشکوک...');
 
     // اسکن مجدد برای اطمینان از لیست به‌روز
-    const scanResult = await scanAllSubgroupsMembers(ctx);
+    const scanResult = await scanAllSubgroupsMembers(ctx, bot, supabase, getActiveSubgroups);
     
     if (!scanResult.success) {
       await ctx.editMessageText('❌ خطا در بن کردن اعضای مشکوک.');
       return;
     }
 
-    const bannedCount = await banSuspiciousMembers(ctx, scanResult.suspiciousList);
+    const bannedCount = await banSuspiciousMembers(ctx, bot, supabase, scanResult.suspiciousList, getActiveSubgroups);
 
     await ctx.editMessageText(`تمام افراد مشکوک با استفاده از تیغه های زیبام با نهایت لذت یکی یکی کشته میشن\n\nتعداد بن شده: ${bannedCount}`);
 
@@ -307,17 +229,11 @@ bot.action('ban_suspicious', async (ctx) => {
     console.log('❌ خطا در بن کردن کاربران مشکوک:', error.message);
     await ctx.answerCbQuery('خطا در بن کردن');
   }
-});
+};
 
 // ==================[ هندلر بخشیدن کاربران مشکوک ]==================
-bot.action('pardon_suspicious', async (ctx) => {
+const handlePardonSuspicious = async (ctx, bot, getSticker) => {
   try {
-    const access = checkOwnerAccess(ctx);
-    if (!access.hasAccess) {
-      await ctx.answerCbQuery('فقط آکی میتونه این کار رو بکنه!');
-      return;
-    }
-
     await ctx.answerCbQuery('اعضای مشکوک بخشیده شدند');
     await ctx.editMessageText('فرصتی دوباره...\n\nاعضای مشکوک میتونن تا دفعه بعدی زنده بمونن');
 
@@ -331,48 +247,13 @@ bot.action('pardon_suspicious', async (ctx) => {
     console.log('❌ خطا در بخشیدن کاربران مشکوک:', error.message);
     await ctx.answerCbQuery('خطا در بخشیدن');
   }
-});
-
-// ==================[ مدیریت خطاها ]==================
-bot.catch((err, ctx) => {
-  console.log(`❌ خطا در ربات وفاداری:`, err);
-});
-
-bot.use(async (ctx, next) => {
-  try {
-    await next();
-  } catch (error) {
-    console.log('❌ خطا در پردازش درخواست وفاداری:', error.message);
-  }
-});
-
-// ==================[ راه‌اندازی ]==================
-const startSymbolBot = async () => {
-  try {
-    console.log('🤖 راه‌اندازی ربات بررسی وفاداری...');
-    
-    const botInfo = await bot.telegram.getMe();
-    console.log(`✅ ربات وفاداری ${botInfo.username} شناسایی شد`);
-    
-    await bot.launch({
-      dropPendingUpdates: true,
-      allowedUpdates: ['message', 'callback_query'],
-    });
-    
-    console.log('✅ ربات بررسی وفاداری فعال شد');
-    
-  } catch (error) {
-    console.log('❌ خطا در راه‌اندازی ربات بررسی وفاداری:', error.message);
-    process.exit(1);
-  }
 };
 
-// اگر فایل مستقل اجرا شد
-if (require.main === module) {
-  startSymbolBot();
-}
-
+// ==================[ اکسپورت توابع ]==================
 module.exports = {
+  checkLoyaltySymbols,
   scanAllSubgroupsMembers,
-  checkLoyaltySymbols
+  handleLoyaltyCheck,
+  handleBanSuspicious,
+  handlePardonSuspicious
 };
