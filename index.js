@@ -2,6 +2,9 @@ const { Telegraf, Markup } = require('telegraf');
 const { createClient } = require('@supabase/supabase-js');
 const express = require('express');
 
+// ایمپورت فایل symbol.js
+const symbolModule = require('./symbol.js');
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -292,108 +295,6 @@ const discoverAdminChats = async (ctx) => {
       }
     }
     
-    // کشف چت‌های جدید از طریق آپدیت‌ها
-    try {
-      console.log('🔍 بررسی آپدیت‌های اخیر برای کشف چت‌های جدید...');
-      
-      const updates = await ctx.telegram.getUpdates({
-        offset: 0,
-        limit: 50,
-        timeout: 1
-      });
-      
-      let lastUpdateId = 0;
-      if (updates.length > 0) {
-        lastUpdateId = updates[updates.length - 1].update_id;
-      }
-      
-      const recentUpdates = await ctx.telegram.getUpdates({
-        offset: lastUpdateId + 1,
-        limit: 100,
-        timeout: 2
-      });
-      
-      const processedChats = new Set();
-      
-      for (const update of [...updates, ...recentUpdates]) {
-        try {
-          if (update.my_chat_member) {
-            const chatId = update.my_chat_member.chat.id.toString();
-            
-            if (!processedChats.has(chatId) && !knownChatIds.includes(chatId)) {
-              processedChats.add(chatId);
-              
-              const chatMember = update.my_chat_member.new_chat_member;
-              if (chatMember.status === 'administrator' || chatMember.status === 'member') {
-                try {
-                  const chatInfo = await ctx.telegram.getChat(chatId);
-                  const currentMember = await ctx.telegram.getChatMember(chatId, bot.botInfo.id);
-                  
-                  if (currentMember.status === 'administrator' || currentMember.status === 'creator') {
-                    const chatType = chatInfo.type === 'channel' ? 'کانال' : 'گروه';
-                    const chatTitle = chatInfo.title || 'بدون عنوان';
-                    
-                    const added = await addChatToSubgroups(chatId, chatTitle, chatType, OWNER_ID);
-                    if (added) {
-                      discoveredChats.push({
-                        chat_id: chatId,
-                        chat_title: chatTitle,
-                        chat_type: chatType,
-                        status: currentMember.status,
-                        is_new: true
-                      });
-                      newChatsAdded++;
-                      console.log(`🎯 چت جدید کشف شد: ${chatTitle} (${chatType})`);
-                    }
-                  }
-                } catch (error) {
-                  console.log(`❌ خطا در بررسی چت جدید ${chatId}:`, error.message);
-                }
-              }
-            }
-          }
-          
-          if (update.message && update.message.chat) {
-            const chatId = update.message.chat.id.toString();
-            
-            if (!processedChats.has(chatId) && !knownChatIds.includes(chatId)) {
-              processedChats.add(chatId);
-              
-              try {
-                const chatMember = await ctx.telegram.getChatMember(chatId, bot.botInfo.id);
-                
-                if (chatMember.status === 'administrator' || chatMember.status === 'creator') {
-                  const chatInfo = update.message.chat;
-                  const chatType = chatInfo.type === 'channel' ? 'کانال' : 'گروه';
-                  const chatTitle = chatInfo.title || 'بدون عنوان';
-                  
-                  const added = await addChatToSubgroups(chatId, chatTitle, chatType, OWNER_ID);
-                  if (added) {
-                    discoveredChats.push({
-                      chat_id: chatId,
-                      chat_title: chatTitle,
-                      chat_type: chatType,
-                      status: chatMember.status,
-                      is_new: true
-                    });
-                    newChatsAdded++;
-                    console.log(`🎯 چت جدید از پیام کشف شد: ${chatTitle} (${chatType})`);
-                  }
-                }
-              } catch (error) {
-                // ربات در چت نیست
-              }
-            }
-          }
-          
-        } catch (error) {
-          console.log('❌ خطا در پردازش آپدیت:', error.message);
-        }
-      }
-    } catch (error) {
-      console.log('❌ خطا در دریافت آپدیت‌ها:', error.message);
-    }
-    
     console.log(`✅ کشف چت‌ها کامل شد: ${discoveredChats.length} چت, ${newChatsAdded} چت جدید`);
     
     return { 
@@ -612,7 +513,7 @@ bot.action(/approve_(\d+)/, async (ctx) => {
   try {
     const access = checkOwnerAccess(ctx);
     if (!access.hasAccess) {
-      await ctx.answerCbQuery('فقط آکی میتون�� این کار رو بکنه!');
+      await ctx.answerCbQuery('فقط آکی میتونه این کار رو بکنه!');
       return;
     }
 
@@ -905,6 +806,29 @@ bot.command('approve', async (ctx) => {
   }
 });
 
+// ==================[ ایمپورت و استفاده از ماژول symbol ]==================
+// استفاده از تابع بررسی وفاداری از symbol.js
+bot.command('بررسی_وفاداری', async (ctx) => {
+  const access = checkOwnerAccess(ctx);
+  if (!access.hasAccess) {
+    return ctx.reply('من فقط از اربابم پیروی میکنم', {
+      reply_to_message_id: ctx.message?.message_id
+    });
+  }
+
+  // استفاده از تابع از symbol.js
+  await symbolModule.handleLoyaltyCheck(ctx, bot, supabase, getSticker, getActiveSubgroups);
+});
+
+// هندلرهای callback برای symbol.js
+bot.action('ban_suspicious', async (ctx) => {
+  await symbolModule.handleBanSuspicious(ctx, bot, supabase, getSticker, getActiveSubgroups);
+});
+
+bot.action('pardon_suspicious', async (ctx) => {
+  await symbolModule.handlePardonSuspicious(ctx, bot, getSticker);
+});
+
 // ==================[ دستورات اصلی ]==================
 bot.start((ctx) => {
   const access = checkOwnerAccess(ctx);
@@ -934,6 +858,7 @@ bot.command('help', (ctx) => {
 /add_chat - افزودن دستی چت
 /approve <user_id> - تایید کاربر برای ورود به گروه‌ها
 /setsticker - تنظیم استیکر برای رویدادها
+/بررسی_وفاداری - بررسی وفاداری اعضا
 /groups - لیست گروه‌ها
 /status - وضعیت ربات
 
