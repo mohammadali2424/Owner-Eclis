@@ -7,8 +7,27 @@ const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_KEY;
 const OWNER_ID = parseInt(process.env.OWNER_ID) || 0;
 
+if (!BOT_TOKEN || !SUPABASE_URL || !SUPABASE_KEY) {
+  console.log('❌ تنظیمات ضروری وجود ندارد');
+  process.exit(1);
+}
+
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 const bot = new Telegraf(BOT_TOKEN);
+
+// ==================[ بررسی مالکیت ]==================
+const checkOwnerAccess = (ctx) => {
+  const userId = ctx.from?.id;
+  if (!userId) {
+    return { hasAccess: false, message: 'کاربر شناسایی نشد' };
+  }
+  
+  if (userId !== OWNER_ID) {
+    return { hasAccess: false, message: 'من فقط از اربابم پیروی میکنم' };
+  }
+  
+  return { hasAccess: true };
+};
 
 // ==================[ بررسی نمادهای وفاداری ]==================
 const checkLoyaltySymbols = (text) => {
@@ -54,7 +73,12 @@ const getActiveSubgroups = async () => {
       .select('chat_id, chat_title, chat_type')
       .eq('is_active', true);
 
-    return error ? [] : (data || []);
+    if (error) {
+      console.log('❌ خطا در دریافت زیرگروه‌ها:', error);
+      return [];
+    }
+
+    return data || [];
   } catch (error) {
     console.log('❌ خطا در دریافت زیرگروه‌ها:', error.message);
     return [];
@@ -90,19 +114,12 @@ const scanAllSubgroupsMembers = async (ctx) => {
         } else {
           // برای گروه ادمین‌ها را بررسی می‌کنیم
           members = admins.map(admin => admin.user).filter(user => !user.is_bot);
-          
-          // سعی در دریافت لیست کامل اعضا (اگر دسترسی داشته باشیم)
-          try {
-            // این قسمت نیاز به دسترسی خاص دارد
-          } catch (error) {
-            console.log(`⚠️ دسترسی به لیست کامل اعضای گروه ${subgroup.chat_title} ممکن نیست`);
-          }
         }
         
         for (const member of members) {
           // اگر کاربر ادمین باشد، از لیست مشکوک‌ها حذف می‌شود
           const isAdmin = adminIds.includes(member.id);
-          const hasSymbol = checkLoyaltySymbols(member.first_name) || checkLoyaltySymbols(member.username);
+          const hasSymbol = checkLoyaltySymbols(member.first_name) || checkLoyaltySymbols(member.last_name) || checkLoyaltySymbols(member.username);
           
           if (hasSymbol) {
             loyalMembers++;
@@ -127,6 +144,8 @@ const scanAllSubgroupsMembers = async (ctx) => {
           totalMembersScanned++;
           await new Promise(resolve => setTimeout(resolve, 100));
         }
+        
+        console.log(`✅ ${subgroup.chat_title}: ${members.length} عضو اسکن شد`);
         
       } catch (error) {
         console.log(`❌ خطا در اسکن ${subgroup.chat_type} "${subgroup.chat_title}":`, error.message);
@@ -163,10 +182,9 @@ const scanAllSubgroupsMembers = async (ctx) => {
 const banSuspiciousMembers = async (ctx, suspiciousList) => {
   try {
     let bannedCount = 0;
+    const subgroups = await getActiveSubgroups();
     
     for (const member of suspiciousList) {
-      const subgroups = await getActiveSubgroups();
-      
       for (const subgroup of subgroups) {
         try {
           // بررسی اینکه کاربر در این چت عضو هست یا نه
@@ -178,6 +196,7 @@ const banSuspiciousMembers = async (ctx, suspiciousList) => {
             console.log(`🚫 کاربر ${member.first_name} از ${subgroup.chat_title} بن شد`);
             
             await new Promise(resolve => setTimeout(resolve, 200));
+            break; // فقط از یک گروه بن کن کافیست
           }
         } catch (error) {
           console.log(`❌ خطا در بن کردن کاربر ${member.user_id} از ${subgroup.chat_title}:`, error.message);
@@ -197,8 +216,8 @@ bot.command('بررسی_وفاداری', async (ctx) => {
   try {
     const access = checkOwnerAccess(ctx);
     if (!access.hasAccess) {
-      return ctx.reply(access.message, {
-        reply_to_message_id: ctx.message.message_id
+      return ctx.reply('من فقط از اربابم پیروی میکنم', {
+        reply_to_message_id: ctx.message?.message_id
       });
     }
 
@@ -314,33 +333,37 @@ bot.action('pardon_suspicious', async (ctx) => {
   }
 });
 
-// ==================[ بررسی مالکیت ]==================
-const checkOwnerAccess = (ctx) => {
-  const userId = ctx.from?.id;
-  if (!userId) {
-    return { hasAccess: false, message: 'کاربر شناسایی نشد' };
+// ==================[ مدیریت خطاها ]==================
+bot.catch((err, ctx) => {
+  console.log(`❌ خطا در ربات وفاداری:`, err);
+});
+
+bot.use(async (ctx, next) => {
+  try {
+    await next();
+  } catch (error) {
+    console.log('❌ خطا در پردازش درخواست وفاداری:', error.message);
   }
-  
-  if (userId !== OWNER_ID) {
-    return { hasAccess: false, message: 'من فقط از اربابم پیروی میکنم' };
-  }
-  
-  return { hasAccess: true };
-};
+});
 
 // ==================[ راه‌اندازی ]==================
 const startSymbolBot = async () => {
   try {
     console.log('🤖 راه‌اندازی ربات بررسی وفاداری...');
     
+    const botInfo = await bot.telegram.getMe();
+    console.log(`✅ ربات وفاداری ${botInfo.username} شناسایی شد`);
+    
     await bot.launch({
       dropPendingUpdates: true,
+      allowedUpdates: ['message', 'callback_query'],
     });
     
     console.log('✅ ربات بررسی وفاداری فعال شد');
     
   } catch (error) {
     console.log('❌ خطا در راه‌اندازی ربات بررسی وفاداری:', error.message);
+    process.exit(1);
   }
 };
 
