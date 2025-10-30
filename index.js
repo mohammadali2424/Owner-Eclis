@@ -90,9 +90,7 @@ try {
     'area_not_protected': 'منطقه بدون حفاظت',
     'bot_added': 'ربات اضافه شد',
     'new_user_join': 'کاربر جدید وارد شد',
-    'member_left': 'کاربر گروه رو ترک کرد',
-    'loyal_member': 'عضو وفادار',
-    'suspicious_member': 'عضو مشکوک'
+    'member_left': 'کاربر گروه رو ترک کرد'
   };
 
   const getSticker = async (stickerType) => {
@@ -141,28 +139,6 @@ try {
       return false;
     } catch (error) {
       console.log(`❌ خطا در ارسال استیکر ${stickerType} به چت ${chatId}:`, error.message);
-      return false;
-    }
-  };
-
-  const setSticker = async (stickerType, stickerFileId) => {
-    try {
-      const { error } = await supabase
-        .from('eclis_stickers')
-        .upsert({
-          sticker_type: stickerType,
-          sticker_file_id: stickerFileId,
-          is_active: true,
-          updated_at: new Date().toISOString()
-        }, { onConflict: 'sticker_type' });
-
-      if (error) {
-        console.log('❌ خطا در ذخیره استیکر:', error);
-        return false;
-      }
-      return true;
-    } catch (error) {
-      console.log('❌ خطا در ذخیره استیکر:', error.message);
       return false;
     }
   };
@@ -310,49 +286,27 @@ try {
     }
   };
 
-  // ==================[ سیستم بررسی خودکار وفاداری هر 10 ساعت ]==================
-  const startAutoLoyaltyCheck = () => {
-    console.log('⏰ راه‌اندازی سیستم بررسی خودکار وفاداری هر 10 ساعت...');
+  // ==================[ سیستم بررسی خودکار هر 10 ساعت ]==================
+  const startAutoScan = () => {
+    console.log('⏰ راه‌اندازی سیستم بررسی خودکار هر 10 ساعت...');
     
     setInterval(async () => {
       try {
         console.log('🔍 بررسی خودکار وفاداری اعضای گروه اصلی...');
-        await checkMainGroupLoyalty();
+        await scanMainGroupMembers();
       } catch (error) {
-        console.log('❌ خطا در بررسی خودکار وفاداری:', error.message);
+        console.log('❌ خطا در بررسی خودکار:', error.message);
       }
     }, 10 * 60 * 60 * 1000); // هر 10 ساعت
     
     // اجرای اولیه
-    setTimeout(() => {
-      checkMainGroupLoyalty();
+    setTimeout(async () => {
+      try {
+        await scanMainGroupMembers();
+      } catch (error) {
+        console.log('❌ خطا در بررسی اولیه:', error.message);
+      }
     }, 30000);
-  };
-
-  const checkMainGroupLoyalty = async () => {
-    try {
-      if (!MAIN_GROUP_ID) {
-        console.log('⚠️ MAIN_GROUP_ID تنظیم نشده - بررسی خودکار غیرفعال');
-        return;
-      }
-
-      console.log('🔍 شروع بررسی خودکار وفاداری گروه اصلی...');
-      
-      const scanResult = await scanAllGroupsMembers();
-      
-      if (scanResult.success && scanResult.suspiciousMembers > 0) {
-        const message = `⚠️ بررسی خودکار وفاداری\n\n` +
-          `👥 اعضای مشکوک پیدا شد: ${scanResult.suspiciousMembers} نفر\n` +
-          `👑 اعضای وفادار: ${scanResult.loyalMembers} نفر\n\n` +
-          `از دستور "بررسی وفاداری" برای اقدام استفاده کنید.`;
-        
-        await bot.telegram.sendMessage(OWNER_ID, message);
-        await sendStickerToChat(OWNER_ID, 'suspicious_member');
-      }
-      
-    } catch (error) {
-      console.log('❌ خطا در بررسی خودکار وفاداری:', error.message);
-    }
   };
 
   // ==================[ دستورات اصلی - فارسی ]==================
@@ -405,7 +359,7 @@ try {
 "راهنما" - این راهنما
 "وضعیت" - وضعیت ربات
 "وضعیت گروه ها" - لیست گروه‌ها
-"بررسی وفاداری" - بررسی وفاداری تمام گروه‌ها
+"بررسی وفاداری" - بررسی وفاداری اعضای گروه اصلی
 "لیست استیکرها" - لیست استیکرهای قابل تنظیم
 "نینجا" - بررسی حفاظت منطقه
 
@@ -480,7 +434,7 @@ try {
         return;
       }
 
-      const tempMessage = await ctx.reply('🔍 در حال بررسی وفاداری اعضای تمام گروه‌ها... این ممکن است چند دقیقه طول بکشد.');
+      const tempMessage = await ctx.reply('🔍 در حال بررسی وفاداری تمام اعضا... این ممکن است چند دقیقه طول بکشد.');
 
       const scanResult = await scanAllGroupsMembers();
       
@@ -492,7 +446,7 @@ try {
         return;
       }
 
-      const { totalScanned, loyalMembers, suspiciousMembers } = scanResult;
+      const { totalScanned, loyalMembers, suspiciousMembers, suspiciousList } = scanResult;
 
       let message = `🎯 نتایج بررسی وفاداری\n\n`;
       message += `📊 آمار کلی:\n`;
@@ -524,7 +478,7 @@ try {
         reply_markup: {
           inline_keyboard: [
             [
-              { text: 'آره ، همشون رو بکش', callback_data: 'ban_suspicious' },
+              { text: '🥷 بکششون', callback_data: 'ban_suspicious' },
               { text: 'نه ، نکششون', callback_data: 'dont_ban_suspicious' }
             ]
           ]
@@ -535,7 +489,7 @@ try {
         .from('eclis_temp_data')
         .upsert({
           key: 'suspicious_list',
-          data: { suspiciousList: scanResult.suspiciousList },
+          data: { suspiciousList: suspiciousList },
           created_at: new Date().toISOString()
         }, { onConflict: 'key' });
 
@@ -602,9 +556,16 @@ try {
         const stickerFileId = ctx.message.reply_to_message.sticker.file_id;
         
         // ذخیره استیکر در دیتابیس
-        const success = await setSticker(stickerType, stickerFileId);
-        
-        if (!success) {
+        const { error } = await supabase
+          .from('eclis_stickers')
+          .upsert({
+            sticker_type: stickerType,
+            sticker_file_id: stickerFileId,
+            is_active: true,
+            updated_at: new Date().toISOString()
+          }, { onConflict: 'sticker_type' });
+
+        if (error) {
           await ctx.reply('❌ خطا در ذخیره استیکر');
           return;
         }
@@ -620,7 +581,7 @@ try {
   // ==================[ سیستم بررسی وفاداری - تمام گروه‌ها ]==================
   const scanAllGroupsMembers = async () => {
     try {
-      console.log('🔍 شروع اسکن اعضای تمام گروه‌ها برای وفاداری...');
+      console.log('🔍 شروع اسکن تمام اعضای گروه‌ها برای وفاداری...');
       
       const subgroups = await getActiveSubgroups();
       let totalMembersScanned = 0;
@@ -630,39 +591,30 @@ try {
       const loyalList = [];
       const suspiciousList = [];
 
-      // اضافه کردن گروه اصلی به لیست بررسی
-      const allChats = [...subgroups];
-      if (MAIN_GROUP_ID) {
-        allChats.push({
-          chat_id: MAIN_GROUP_ID,
-          chat_title: 'گروه اصلی Eclis',
-          chat_type: 'گروه'
-        });
-      }
-
-      for (const chat of allChats) {
+      for (const subgroup of subgroups) {
         try {
-          console.log(`🔍 اسکن ${chat.chat_title}...`);
-          
           // دریافت ادمین‌های گروه
-          const admins = await bot.telegram.getChatAdministrators(chat.chat_id);
+          const admins = await bot.telegram.getChatAdministrators(subgroup.chat_id);
           const adminIds = admins.map(admin => admin.user.id);
           
-          // دریافت اطلاعات اعضا (تا 100 عضو)
-          const membersCount = await bot.telegram.getChatMembersCount(chat.chat_id);
-          console.log(`👥 ${chat.chat_title} دارای ${membersCount} عضو`);
+          // دریافت اطلاعات اعضا (تا 200 عضو)
+          const membersCount = await bot.telegram.getChatMembersCount(subgroup.chat_id);
+          console.log(`👥 گروه ${subgroup.chat_title} دارای ${membersCount} عضو`);
           
-          for (let i = 0; i < Math.min(membersCount, 100); i++) {
+          for (let i = 0; i < Math.min(membersCount, 200); i++) {
             try {
-              const members = await bot.telegram.getChatMembers(chat.chat_id, i, 1);
+              const members = await bot.telegram.getChatMembers(subgroup.chat_id, i, 1);
               
               if (members.length > 0) {
                 const member = members[0].user;
                 
                 if (member.is_bot) continue; // ربات‌ها را نادیده بگیر
                 
-                // بررسی آیا کاربر ادمین است
-                const isAdmin = adminIds.includes(member.id);
+                // اگر کاربر ادمین باشد، نادیده بگیر
+                if (adminIds.includes(member.id)) {
+                  console.log(`🛡️ کاربر ادمین ${member.first_name} نادیده گرفته شد`);
+                  continue;
+                }
                 
                 // بررسی وفاداری بر اساس نام و نام کاربری
                 const hasSymbolInName = checkLoyaltySymbols(member.first_name);
@@ -677,7 +629,7 @@ try {
                     username: member.username || '',
                     first_name: member.first_name || 'ناشناس',
                     has_symbol: hasSymbol,
-                    is_admin: isAdmin,
+                    is_admin: false,
                     last_checked: new Date().toISOString()
                   }, { onConflict: 'user_id' });
 
@@ -687,23 +639,26 @@ try {
                     user_id: member.id,
                     username: member.username,
                     first_name: member.first_name,
-                    chat_title: chat.chat_title,
-                    is_admin: isAdmin
+                    chat_title: subgroup.chat_title,
+                    is_loyal: true
                   });
-                } else if (!isAdmin) { // فقط کاربران غیرادمین مشکوک محسوب می‌شوند
+                  console.log(`✅ کاربر وفادار: ${member.first_name}`);
+                } else {
                   suspiciousMembers++;
                   suspiciousList.push({
                     user_id: member.id,
                     username: member.username,
                     first_name: member.first_name,
-                    chat_title: chat.chat_title
+                    chat_title: subgroup.chat_title,
+                    is_loyal: false
                   });
+                  console.log(`⚠️ کاربر مشکوک: ${member.first_name}`);
                 }
                 
                 totalMembersScanned++;
               }
             } catch (memberError) {
-              console.log(`❌ خطا در دریافت اطلاعات عضو ${i} از ${chat.chat_title}:`, memberError.message);
+              console.log(`❌ خطا در دریافت اطلاعات عضو ${i}:`, memberError.message);
             }
             
             // تأخیر برای جلوگیری از محدودیت تلگرام
@@ -711,7 +666,7 @@ try {
           }
           
         } catch (error) {
-          console.log(`❌ خطا در اسکن ${chat.chat_title}:`, error.message);
+          console.log(`❌ خطا در اسکن گروه ${subgroup.chat_title}:`, error.message);
         }
       }
       
@@ -737,6 +692,106 @@ try {
         loyalList: [],
         suspiciousList: []
       };
+    }
+  };
+
+  // ==================[ سیستم بررسی گروه اصلی ]==================
+  const scanMainGroupMembers = async () => {
+    try {
+      console.log('🔍 بررسی خودکار وفاداری اعضای گروه اصلی...');
+      
+      if (!MAIN_GROUP_ID) {
+        console.log('❌ MAIN_GROUP_ID تنظیم نشده');
+        return { success: false };
+      }
+
+      let totalMembersScanned = 0;
+      let loyalMembers = 0;
+      let suspiciousMembers = 0;
+
+      try {
+        // دریافت ادمین‌های گروه اصلی
+        const admins = await bot.telegram.getChatAdministrators(MAIN_GROUP_ID);
+        const adminIds = admins.map(admin => admin.user.id);
+        
+        // دریافت اطلاعات اعضا
+        const membersCount = await bot.telegram.getChatMembersCount(MAIN_GROUP_ID);
+        console.log(`👥 گروه اصلی دارای ${membersCount} عضو`);
+        
+        for (let i = 0; i < Math.min(membersCount, 100); i++) {
+          try {
+            const members = await bot.telegram.getChatMembers(MAIN_GROUP_ID, i, 1);
+            
+            if (members.length > 0) {
+              const member = members[0].user;
+              
+              if (member.is_bot) continue;
+              
+              // اگر کاربر ادمین باشد، نادیده بگیر
+              if (adminIds.includes(member.id)) {
+                continue;
+              }
+              
+              // بررسی وفاداری
+              const hasSymbolInName = checkLoyaltySymbols(member.first_name);
+              const hasSymbolInUsername = checkLoyaltySymbols(member.username);
+              const hasSymbol = hasSymbolInName || hasSymbolInUsername;
+
+              await supabase
+                .from('eclis_members')
+                .upsert({
+                  user_id: member.id,
+                  username: member.username || '',
+                  first_name: member.first_name || 'ناشناس',
+                  has_symbol: hasSymbol,
+                  is_admin: false,
+                  last_checked: new Date().toISOString()
+                }, { onConflict: 'user_id' });
+
+              if (hasSymbol) {
+                loyalMembers++;
+              } else {
+                suspiciousMembers++;
+              }
+              
+              totalMembersScanned++;
+            }
+          } catch (memberError) {
+            console.log(`❌ خطا در دریافت اطلاعات عضو ${i}:`, memberError.message);
+          }
+          
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        
+      } catch (error) {
+        console.log('❌ خطا در اسکن گروه اصلی:', error.message);
+      }
+      
+      console.log(`✅ بررسی خودکار کامل شد: ${totalMembersScanned} عضو - وفادار: ${loyalMembers}, مشکوک: ${suspiciousMembers}`);
+      
+      // اگر کاربر مشکوک وجود دارد، اطلاع به مالک
+      if (suspiciousMembers > 0) {
+        try {
+          await bot.telegram.sendMessage(
+            OWNER_ID,
+            `⚠️ بررسی خودکار: ${suspiciousMembers} عضو مشکوک در گروه اصلی پیدا شد\n\n` +
+            `از دستور "بررسی وفاداری" برای اقدام استفاده کنید`
+          );
+        } catch (error) {
+          console.log('❌ خطا در اطلاع به مالک:', error.message);
+        }
+      }
+      
+      return { 
+        success: true, 
+        totalScanned: totalMembersScanned,
+        loyalMembers: loyalMembers,
+        suspiciousMembers: suspiciousMembers
+      };
+      
+    } catch (error) {
+      console.log('❌ خطا در بررسی خودکار:', error.message);
+      return { success: false };
     }
   };
 
@@ -766,7 +821,6 @@ try {
 
       for (const user of suspiciousList) {
         try {
-          // بن از تمام گروه‌ها
           const subgroups = await getActiveSubgroups();
           
           for (const subgroup of subgroups) {
@@ -775,16 +829,6 @@ try {
               console.log(`✅ کاربر ${user.user_id} از ${subgroup.chat_title} بن شد`);
             } catch (banError) {
               console.log(`❌ خطا در بن کردن کاربر ${user.user_id} از ${subgroup.chat_title}:`, banError.message);
-            }
-          }
-          
-          // بن از گروه اصلی اگر وجود دارد
-          if (MAIN_GROUP_ID) {
-            try {
-              await ctx.telegram.banChatMember(MAIN_GROUP_ID, user.user_id);
-              console.log(`✅ کاربر ${user.user_id} از گروه اصلی بن شد`);
-            } catch (banError) {
-              console.log(`❌ خطا در بن کردن کاربر ${user.user_id} از گروه اصلی:`, banError.message);
             }
           }
           
@@ -872,9 +916,7 @@ try {
 
           // سکوت کاربر تا زمان تایید
           try {
-            const untilDate = Math.floor(Date.now() / 1000) + (60 * 60 * 24 * 7); // 7 روز
             await ctx.telegram.restrictChatMember(chatId, member.id, {
-              until_date: untilDate,
               permissions: {
                 can_send_messages: false,
                 can_send_media_messages: false,
@@ -986,7 +1028,6 @@ try {
         await sendStickerToChat(ctx.chat.id, 'user_approved');
         
         await ctx.answerCbQuery('کاربر تایید شد');
-
       } else {
         await ctx.answerCbQuery('خطا در تایید کاربر');
       }
@@ -1009,9 +1050,8 @@ try {
       // بن کاربر از گروه اصلی
       try {
         await ctx.telegram.banChatMember(MAIN_GROUP_ID, userId);
-        await ctx.telegram.unbanChatMember(MAIN_GROUP_ID, userId); // حذف از بن لیست
       } catch (banError) {
-        console.log(`❌ خطا در اخراج کاربر ${userId}:`, banError.message);
+        console.log(`❌ خطا در بن کردن کاربر ${userId}:`, banError.message);
       }
 
       // حذف از لیست انتظار
@@ -1053,7 +1093,7 @@ try {
       // اگر ربات به عنوان ادمین یا عضو اضافه شده باشد
       if (chatMember.status === 'administrator' || chatMember.status === 'member') {
         
-        // اگر توسط مالک اضافه شده باشد
+        // اگر اضافه کننده مالک باشد
         if (addedBy === OWNER_ID) {
           const chatType = chat.type === 'channel' ? 'کانال' : 'گروه';
           const chatTitle = chat.title || 'بدون عنوان';
@@ -1062,12 +1102,12 @@ try {
           const added = await addChatToSubgroups(chatId, chatTitle, chatType, addedBy);
           
           if (added) {
-            await ctx.reply('این بخش به بخش های تحت نظارت نینجای چهارم اضافه شد 🥷🏻');
+            await ctx.reply('🥷🏻 این بخش به بخش های تحت نظارت نینجای چهارم اضافه شد');
             await sendStickerIfExists(ctx, 'bot_added');
           }
         } else {
-          // اگر توسط شخص دیگری اضافه شده باشد
-          await ctx.reply('این ربات متعلق به مجموعه بزرگ Eclis است و جز آکی کسی نمیتونه به من دستور بده');
+          // اگر شخص دیگری ربات را اضافه کرده
+          await ctx.reply('🚫 این ربات متعلق به مجموعه بزرگ Eclis است و جز آکی کسی نمیتونه به من دستور بده');
           
           // لفت دادن از گروه
           try {
@@ -1111,8 +1151,8 @@ try {
       
       console.log('✅ ربات با موفقیت فعال شد و در حال گوش دادن است...');
       
-      // راه‌اندازی سیستم بررسی خودکار وفاداری
-      startAutoLoyaltyCheck();
+      // راه‌اندازی سیستم بررسی خودکار
+      startAutoScan();
       
       // اطلاع به مالک
       try {
@@ -1126,7 +1166,7 @@ try {
           `• بررسی وفاداری (تمام گروه‌ها)\n` +
           `• سیستم استیکر\n` +
           `• محافظت خودکار\n` +
-          `• بررسی خودکار وفاداری هر 10 ساعت`
+          `• بررسی خودکار هر 10 ساعت`
         );
         console.log('✅ پیام فعال شدن به مالک ارسال شد');
       } catch (error) {
@@ -1178,4 +1218,4 @@ try {
 } catch (error) {
   console.log('❌ خطا در راه‌اندازی اولیه:', error.message);
   process.exit(1);
-          }
+        }
