@@ -772,7 +772,7 @@ try {
               chat_id: chatId,
               question_message_id: questionMessage.message_id,
               joined_at: new Date().toISOString()
-            }, { onConflict: 'user_id' );
+            }, { onConflict: 'user_id' });
 
           // سکوت کاربر تا زمان تایید
           try {
@@ -1096,4 +1096,4 @@ try {
 } catch (error) {
   console.log('❌ خطا در راه‌اندازی اولیه:', error.message);
   process.exit(1);
-    }
+        }
