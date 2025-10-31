@@ -43,7 +43,7 @@ try {
     console.log('📝 Context:', ctx.updateType);
   });
 
-  // ==================[ میدلور لاگ‌گیری و ریپلای به مالک ]==================
+  // ==================[ میدلور لاگ‌گیری - اصلاح شده ]==================
   bot.use(async (ctx, next) => {
     const userId = ctx.from?.id;
     const chatType = ctx.chat?.type;
@@ -53,21 +53,6 @@ try {
     
     try {
       await next();
-      
-      // ریپلای به مالک برای تمام پیام‌های دریافتی
-      if (ctx.message && userId !== OWNER_ID && ctx.message.text) {
-        try {
-          const chatTitle = ctx.chat.title || 'چت خصوصی';
-          await bot.telegram.sendMessage(
-            OWNER_ID,
-            `📨 پیام جدید از ${ctx.from.first_name || 'ناشناس'} (${userId}) در ${chatTitle}:\n\n${ctx.message.text}`,
-            { reply_to_message_id: ctx.message.message_id }
-          );
-          console.log(`✅ ریپلای به مالک ارسال شد`);
-        } catch (error) {
-          console.log('⚠️ خطا در ارسال ریپلای به مالک:', error.message);
-        }
-      }
     } catch (error) {
       console.log('❌ خطا در پردازش:', error.message);
       if (ctx.message) {
@@ -83,35 +68,46 @@ try {
     return userId && userId.toString() === OWNER_ID.toString();
   };
 
-  // ==================[ بررسی نمادهای وفاداری - کاملاً اصلاح شده ]==================
+  // ==================[ بررسی نمادهای وفاداری - کاملاً بازنویسی شده ]==================
   const checkLoyaltySymbols = (text) => {
     if (!text || typeof text !== 'string') {
       return false;
     }
     
-    // سمبل‌های وفاداری
-    const symbols = ['꩘', '𖮌', 'ꑭ', '𖢻'];
-    const textStr = String(text).normalize('NFC');
+    // نمادهای وفاداری
+    const loyaltySymbols = [
+      '\uAA58', // ꩘
+      '\u16ACC', // 𖮌 
+      '\uA46D', // ꑭ
+      '\u168BB' // 𖢻
+    ];
     
-    console.log(`🔍 بررسی نماد در متن: "${textStr}"`);
+    console.log(`🔍 بررسی وفاداری برای متن: "${text}"`);
+    console.log(`📏 طول متن: ${text.length}`);
     
-    // بررسی تک‌تک کاراکترها
-    for (let char of textStr) {
-      if (symbols.includes(char)) {
-        console.log(`✅ نماد وفاداری پیدا شد: "${char}"`);
+    // بررسی هر کاراکتر در متن
+    for (let i = 0; i < text.length; i++) {
+      const char = text[i];
+      const charCode = char.charCodeAt(0).toString(16).toUpperCase();
+      
+      console.log(`🔤 کاراکتر ${i}: "${char}" - یونیکد: U+${charCode}`);
+      
+      if (loyaltySymbols.includes(char)) {
+        console.log(`✅ نماد وفاداری پیدا شد: "${char}" (U+${charCode})`);
         return true;
       }
     }
     
-    // بررسی ترکیبی از کاراکترها
-    for (const symbol of symbols) {
-      if (textStr.includes(symbol)) {
-        console.log(`✅ نماد وفاداری پیدا شد: "${symbol}"`);
+    // بررسی اضافی برای اطمینان
+    for (const symbol of loyaltySymbols) {
+      const symbolCode = symbol.charCodeAt(0).toString(16).toUpperCase();
+      if (text.includes(symbol)) {
+        console.log(`✅ نماد وفاداری (مجددا) پیدا شد: "${symbol}" (U+${symbolCode})`);
         return true;
       }
     }
     
-    console.log(`❌ هیچ نماد وفاداری در متن پیدا نشد: "${textStr}"`);
+    console.log(`❌ هیچ نماد وفاداری پیدا نشد`);
     return false;
   };
 
@@ -378,26 +374,14 @@ try {
   // ==================[ تابع کمکی برای دریافت اعضای گروه ]==================
   const getGroupMembers = async (chatId) => {
     try {
-      const members = [];
-      let offset = 0;
-      const limit = 100;
+      // فقط می‌توانیم ادمین‌ها را دریافت کنیم
+      const admins = await bot.telegram.getChatAdministrators(chatId);
+      const members = admins.map(admin => ({
+        user: admin.user,
+        status: admin.status
+      }));
       
-      while (true) {
-        try {
-          const chunk = await bot.telegram.getChatMembers(chatId, offset, limit);
-          if (!chunk || chunk.length === 0) break;
-          
-          members.push(...chunk);
-          offset += limit;
-          
-          // تأخیر برای جلوگیری از محدودیت
-          await new Promise(resolve => setTimeout(resolve, 100));
-        } catch (error) {
-          console.log('❌ خطا در دریافت اعضا:', error.message);
-          break;
-        }
-      }
-      
+      console.log(`✅ ${members.length} ادمین از گروه ${chatId} دریافت شد`);
       return members;
     } catch (error) {
       console.log('❌ خطا در دریافت اعضای گروه:', error.message);
@@ -416,16 +400,11 @@ try {
       const loyalList = [];
       const suspiciousList = [];
 
-      // دریافت ادمین‌های گروه
-      const admins = await bot.telegram.getChatAdministrators(chatId);
-      const adminIds = admins.map(admin => admin.user.id);
-
       for (const member of members) {
         try {
           const user = member.user;
           
           if (user.is_bot) continue;
-          if (adminIds.includes(user.id)) continue;
           
           // بررسی وفاداری
           const hasSymbolInName = checkLoyaltySymbols(user.first_name);
@@ -440,7 +419,7 @@ try {
               username: user.username || '',
               first_name: user.first_name || 'ناشناس',
               has_symbol: hasSymbol,
-              is_admin: false,
+              is_admin: member.status === 'administrator' || member.status === 'creator',
               last_checked: new Date().toISOString()
             }, { onConflict: 'user_id' });
 
@@ -716,7 +695,7 @@ try {
       await ctx.reply(message);
 
     } catch (error) {
-      console.log('❌ خط�� در نمایش لیست استیکرها:', error.message);
+      console.log('❌ خطا در نمایش لیست استیکرها:', error.message);
       await ctx.reply('❌ خطا در نمایش لیست استیکرها');
     }
   });
@@ -1195,7 +1174,7 @@ try {
     }
   });
 
-  // ==================[ هندلر اضافه شدن ربات به گروه/کانال ]==================
+  // ==================[ هندلر اضافه شدن ربات به گروه/کانال - کاملاً اصلاح شده ]==================
   bot.on('my_chat_member', async (ctx) => {
     try {
       const chatMember = ctx.myChatMember.new_chat_member;
@@ -1203,7 +1182,8 @@ try {
       const chatId = chat.id.toString();
       const addedBy = ctx.myChatMember.from.id;
       
-      console.log(`🤖 وضعیت ربات در چت ${chat.title}: ${chatMember.status}`);
+      console.log(`🤖 وضعیت ربات در چت ${chat.title} (${chatId}): ${chatMember.status}`);
+      console.log(`👤 اضافه شده توسط: ${addedBy} (مالک: ${OWNER_ID})`);
       
       // اگر ربات به عنوان ادمین یا عضو اضافه شده باشد
       if (chatMember.status === 'administrator' || chatMember.status === 'member') {
@@ -1213,24 +1193,73 @@ try {
           const chatType = chat.type === 'channel' ? 'کانال' : 'گروه';
           const chatTitle = chat.title || 'بدون عنوان';
           
+          console.log(`✅ اضافه شده توسط مالک - افزودن به زیرمجموعه...`);
+          
           // اضافه کردن به زیرمجموعه‌ها
           const added = await addChatToSubgroups(chatId, chatTitle, chatType, addedBy);
           
           if (added) {
-            await ctx.reply('🥷🏻 این بخش به بخش های تحت نظارت نینجای چهارم اضافه شد');
-            await sendStickerIfExists(ctx, 'bot_added');
+            console.log(`✅ چت با موفقیت به زیرمجموعه اضافه شد`);
+            
+            // فقط اگر گروه باشد و بتوان پیام فرستاد
+            if (chat.type !== 'channel') {
+              try {
+                await ctx.reply('🥷🏻 این بخش به بخش های تحت نظارت نینجای چهارم اضافه شد');
+                await sendStickerIfExists(ctx, 'bot_added');
+              } catch (messageError) {
+                console.log('⚠️ نتوانستم پیام تأیید ارسال کنم:', messageError.message);
+              }
+            } else {
+              // برای کانال، به مالک اطلاع دهیم
+              await bot.telegram.sendMessage(
+                OWNER_ID, 
+                `✅ کانال "${chatTitle}" به زیرمجموعه‌ها اضافه شد`
+              );
+            }
+          } else {
+            console.log('❌ خطا در افزودن چت به زیرمجموعه');
+            if (chat.type !== 'channel') {
+              await ctx.reply('❌ خطا در ثبت این چت در سیستم');
+            }
           }
         } else {
           // اگر شخص دیگری ربات را اضافه کرده
-          await ctx.reply('🚫 این ربات متعلق به مجموعه بزرگ Eclis است و جز آکی کسی نمیتونه به من دستور بده');
+          console.log(`🚫 ربات توسط غیرمالک اضافه شده: ${addedBy}`);
           
-          // لفت دادن از گروه
+          if (chat.type !== 'channel') {
+            try {
+              await ctx.reply('🚫 این ربات متعلق به مجموعه بزرگ Eclis است و جز آکی کسی نمیتونه به من دستور بده');
+            } catch (messageError) {
+              console.log('⚠️ نتوانستم پیام خطا ارسال کنم');
+            }
+          }
+          
+          // لفت دادن از گروه/کانال
           try {
             await ctx.telegram.leaveChat(chatId);
-            console.log(`🚪 ربات از گروه ${chat.title} لفت داد`);
+            console.log(`🚪 ربات از چت ${chat.title} لفت داد`);
           } catch (leaveError) {
             console.log(`❌ خطا در لفت دادن از چت:`, leaveError.message);
           }
+        }
+      }
+      
+      // اگر ربات از گروه حذف شده
+      if (chatMember.status === 'kicked' || chatMember.status === 'left') {
+        console.log(`🔙 ربات از چت ${chat.title} حذف شده`);
+        
+        // غیرفعال کردن چت در دیتابیس
+        try {
+          const { error } = await supabase
+            .from('eclis_subgroups')
+            .update({ is_active: false })
+            .eq('chat_id', chatId);
+            
+          if (!error) {
+            console.log(`✅ چت ${chatId} در دیتابیس غیرفعال شد`);
+          }
+        } catch (dbError) {
+          console.log('❌ خطا در غیرفعال کردن چت:', dbError.message);
         }
       }
       
@@ -1239,8 +1268,65 @@ try {
     }
   });
 
+  // ==================[ دستورات تست و دیباگ ]==================
+  bot.hears(['تست نماد'], async (ctx) => {
+    try {
+      const testText = ctx.message.text.replace('تست نماد', '').trim();
+      
+      if (!testText) {
+        await ctx.reply('لطفاً متن را بعد از "تست نماد" وارد کنید\nمثال: تست نماد ꩘');
+        return;
+      }
+      
+      const hasSymbol = checkLoyaltySymbols(testText);
+      
+      await ctx.reply(
+        `🔍 نتیجه بررسی نماد:\n` +
+        `متن: "${testText}"\n` +
+        `طول: ${testText.length} کاراکتر\n` +
+        `نماد وفاداری: ${hasSymbol ? '✅ پیدا شد' : '❌ پیدا نشد'}\n\n` +
+        `کاراکترها:\n${Array.from(testText).map((char, i) => 
+          `[${i}] "${char}" - U+${char.charCodeAt(0).toString(16).toUpperCase()}`
+        ).join('\n')}`
+      );
+    } catch (error) {
+      console.log('❌ خطا در دستور تست نماد:', error.message);
+      await ctx.reply('❌ خطا در تست نماد');
+    }
+  });
+
+  bot.hears(['تست زیرمجموعه'], async (ctx) => {
+    try {
+      if (!isOwner(ctx.from.id)) {
+        await ctx.reply('فقط مالک می‌تواند این دستور را اجرا کند');
+        return;
+      }
+      
+      const chatId = ctx.chat.id.toString();
+      const chatTitle = ctx.chat.title || 'بدون عنوان';
+      const chatType = ctx.chat.type;
+      
+      const isInSubgroups = await isChatInSubgroups(chatId);
+      const subgroups = await getActiveSubgroups();
+      
+      let message = `📊 اطلاعات زیرمجموعه‌ها:\n\n`;
+      message += `• این چت در زیرمجموعه: ${isInSubgroups ? '✅ هست' : '❌ نیست'}\n`;
+      message += `• تعداد کل زیرمجموعه‌های فعال: ${subgroups.length}\n\n`;
+      message += `لیست زیرمجموعه‌ها:\n`;
+      
+      subgroups.forEach((group, index) => {
+        message += `${index + 1}. ${group.chat_title} (${group.chat_type})\n`;
+      });
+      
+      await ctx.reply(message);
+    } catch (error) {
+      console.log('❌ خطا در دستور تست زیرمجموعه:', error.message);
+      await ctx.reply('❌ خطا در تست زیرمجموعه');
+    }
+  });
+
   // ==================[ اطلاع به مالک ]==================
-  const notifyOwner = async (type) => {
+  const notifyOwner = async (type, error = null) => {
     try {
       const botInfo = await bot.telegram.getMe();
       let message = '';
@@ -1360,4 +1446,4 @@ try {
 } catch (error) {
   console.log('❌ خطا در راه‌اندازی اولیه:', error.message);
   process.exit(1);
-                }
+}
