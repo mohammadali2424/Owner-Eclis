@@ -5,14 +5,12 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "dev": "nodemon index.js"
+    "dev": "node index.js"
   },
   "dependencies": {
     "telegraf": "^4.16.3",
-    "@supabase/supabase-js": "^2.39.7"
-  },
-  "devDependencies": {
-    "nodemon": "^3.0.2"
+    "@supabase/supabase-js": "^2.39.7",
+    "express": "^4.18.2"
   },
   "keywords": ["telegram", "bot", "security"],
   "author": "Eclis Team",
