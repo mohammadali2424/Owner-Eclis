@@ -3,7 +3,7 @@ const http = require('http');
 const express = require('express');
 
 // تنظیمات اصلی - وارد شده توسط شما
-const BOT_TOKEN = '7495437597:AAH6pY4j6Zz6z6z6z6z6z6z6z6z6z6z6z6z'; // باید توکن واقعی رو از @BotFather بگیرید
+const BOT_TOKEN = '8135660826:AAHpqzFlEsy_rWcGjWMqvv-KCvE7tzUuT0I'; // باید توکن واقعی رو از @BotFather بگیرید
 const SUPABASE_URL = 'https://phdwvxyglwnlqjciipgr.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBoZHd2eHlnbHdubHFqY2lpcGdyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk5OTU5MzUsImV4cCI6MjA3NTU3MTkzNX0.__c_CZk7vv9KIiPuDiTpWdblXeHwBo69z88x4vReTtQ';
 const GATEWAY_GROUP_ID = -1002483328877; // گروه دروازه
