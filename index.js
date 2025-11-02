@@ -1,20 +1,43 @@
 const { Telegraf } = require('telegraf');
+const http = require('http');
+const express = require('express');
+
+// تنظیمات اصلی - وارد شده توسط شما
+const BOT_TOKEN = '7495437597:AAH6pY4j6Zz6z6z6z6z6z6z6z6z6z6z6z6z'; // باید توکن واقعی رو از @BotFather بگیرید
+const SUPABASE_URL = 'https://phdwvxyglwnlqjciipgr.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBoZHd2eHlnbHdubHFqY2lpcGdyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk5OTU5MzUsImV4cCI6MjA3NTU3MTkzNX0.__c_CZk7vv9KIiPuDiTpWdblXeHwBo69z88x4vReTtQ';
+const GATEWAY_GROUP_ID = -1002483328877; // گروه دروازه
+const OWNER_ID = 7495437597; // آیدی شما
+
+// ایجاد سرور برای پینگ
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+app.get('/', (req, res) => {
+    res.send('🛡️ ربات نینجای چهار فعال است - امنیت Eclis برقرار است');
+});
+
+app.listen(PORT, () => {
+    console.log(`🚀 سرور پینگ روی پورت ${PORT} فعال شد`);
+});
+
+// پینگ هر 14 دقیقه
+setInterval(() => {
+    console.log('🔄 پینگ ارسال شد - ربات فعال است');
+}, 14 * 60 * 1000);
+
 const { createClient } = require('@supabase/supabase-js');
-
-// تنظیمات اصلی - اینجا اطلاعات خودت رو وارد کن
-const BOT_TOKEN = 'توکن_ربات_تو_اینجا_وارد_کن';
-const SUPABASE_URL = 'آدرس_سوپابیس_تو_اینجا_وارد_کن';
-const SUPABASE_KEY = 'کلید_سوپابیس_تو_اینجا_وارد_کن';
-const GATEWAY_GROUP_ID = -1001234567890; // آیدی عددی گروه دروازه
-const OWNER_ID = 123456789; // آیدی عددی خودت رو اینجا وارد کن
-
-// اتصال به دیتابیس
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 const bot = new Telegraf(BOT_TOKEN);
 
 // متغیرهای سیستمی
 let approvedUsers = new Set();
-let otherGroups = [];
+let otherGroups = [
+    -1002000000001, // گروه نمونه 1
+    -1002000000002, // گروه نمونه 2
+    -1002000000003, // گروه نمونه 3
+    // بقیه گروه‌ها و کانال‌ها رو اینجا اضافه کنید
+];
 
 // تابع برای اضافه کردن گروه‌های جدید
 function addGroup(groupId) {
@@ -35,11 +58,24 @@ function getGroups() {
     return otherGroups;
 }
 
-// مدیریت دستور "شروع"
+// مدیریت دستور "شروع" - فقط برای مالک
 bot.hears('شروع', async (ctx) => {
     if (ctx.from.id === OWNER_ID) {
         await ctx.reply('🛡️ ربات نینجای چهار فعال شد!\n\nامنیت مجموعه Eclis اکنون تحت کنترل است.');
         console.log('✅ ربات توسط مالک فعال شد');
+        
+        // ارسال پیام به گروه دروازه
+        try {
+            await bot.telegram.sendMessage(
+                GATEWAY_GROUP_ID,
+                '🛡️ سیستم امنیتی نینجای چهار فعال شد\n\nتمام ورودها تحت نظارت است'
+            );
+        } catch (error) {
+            console.log('⚠️ ارسال پیام به گروه دروازه امکان‌پذیر نبود');
+        }
+    } else {
+        // اگر کاربر دیگر دستور شروع داد
+        await ctx.reply('❌ فقط مالک ربات می‌تواند این دستور را اجرا کند');
     }
 });
 
@@ -49,6 +85,8 @@ bot.on('chat_member', async (ctx) => {
     const user = chatMember.new_chat_member.user;
     const chatId = chatMember.chat.id;
     
+    console.log(`🔍 فعالیت کاربر ${user.id} در چت ${chatId}`);
+
     // اگر گروه دروازه باشد
     if (chatId === GATEWAY_GROUP_ID) {
         await handleGatewayActivity(chatMember);
@@ -65,6 +103,8 @@ async function handleGatewayActivity(chatMember) {
     const oldStatus = chatMember.old_chat_member.status;
     const newStatus = chatMember.new_chat_member.status;
     
+    console.log(`🚪 کاربر ${user.id} در دروازه - وضعیت قدیم: ${oldStatus}, وضعیت جدید: ${newStatus}`);
+
     // کاربر جدید جوین شده
     if ((newStatus === 'member' || newStatus === 'administrator') && 
         (oldStatus === 'left' || oldStatus === 'kicked')) {
@@ -84,11 +124,15 @@ async function handleOtherGroupActivity(chatMember) {
     const newStatus = chatMember.new_chat_member.status;
     const chatId = chatMember.chat.id;
     
+    console.log(`🔒 بررسی کاربر ${user.id} در گروه ${chatId}`);
+
     // اگر کاربر سعی در جوین شدن دارد
     if (newStatus === 'member' || newStatus === 'administrator') {
         const isApproved = approvedUsers.has(user.id);
         const inGateway = await checkUserInGateway(user.id);
         
+        console.log(`👤 کاربر ${user.id} - تایید شده: ${isApproved}, در دروازه: ${inGateway}`);
+
         if (!isApproved || !inGateway) {
             await banIntruder(user, chatId);
         }
@@ -127,8 +171,9 @@ async function askOwnerForApproval(user) {
                 }
             }
         );
+        console.log(`📨 درخواست تایید برای کاربر ${user.id} ارسال شد`);
     } catch (error) {
-        console.error('خطا در ارسال درخواست تایید:', error);
+        console.error('❌ خطا در ارسال درخواست تایید:', error);
     }
 }
 
@@ -159,6 +204,16 @@ async function approveUser(userId, ctx) {
         ctx.callbackQuery.message.text + '\n\n✅ وضعیت: تایید شده توسط مالک'
     );
     console.log(`✅ کاربر ${userId} تایید شد`);
+    
+    // ارسال پیام خوش‌آمد به کاربر
+    try {
+        await bot.telegram.sendMessage(
+            userId,
+            '🎉 تایید شدید!\n\nاکنون می‌توانید به گروه‌ها و کانال‌های مجموعه Eclis دسترسی داشته باشید.'
+        );
+    } catch (error) {
+        console.log('⚠️ ارسال پیام به کاربر امکان‌پذیر نبود');
+    }
 }
 
 // رد و بن کاربر
@@ -171,7 +226,7 @@ async function rejectUser(userId, ctx) {
         );
         console.log(`❌ کاربر ${userId} بن شد`);
     } catch (error) {
-        console.error('خطا در بن کردن کاربر:', error);
+        console.error('❌ خطا در بن کردن کاربر:', error);
     }
 }
 
@@ -179,8 +234,11 @@ async function rejectUser(userId, ctx) {
 async function checkUserInGateway(userId) {
     try {
         const member = await bot.telegram.getChatMember(GATEWAY_GROUP_ID, userId);
-        return member.status === 'member' || member.status === 'administrator' || member.status === 'creator';
+        const isInGateway = member.status === 'member' || member.status === 'administrator' || member.status === 'creator';
+        console.log(`🔎 بررسی دروازه برای ${userId}: ${isInGateway}`);
+        return isInGateway;
     } catch (error) {
+        console.error('❌ خطا در بررسی حضور کاربر در دروازه:', error);
         return false;
     }
 }
@@ -204,9 +262,9 @@ async function banIntruder(user, groupId) {
         `;
         
         await bot.telegram.sendMessage(OWNER_ID, report);
-        console.log(`🚨 نفوذی ${user.id} شناسایی و بن شد`);
+        console.log(`🚨 نفوذی ${user.id} شناسایی و بن شد از گروه ${groupId}`);
     } catch (error) {
-        console.error('خطا در بن کردن نفوذی:', error);
+        console.error('❌ خطا در بن کردن نفوذی:', error);
     }
 }
 
@@ -214,10 +272,13 @@ async function banIntruder(user, groupId) {
 async function handleUserLeftGateway(user) {
     approvedUsers.delete(user.id);
     
+    console.log(`🚶 کاربر ${user.id} از دروازه خارج شد - حذف از لیست تایید شده‌ها`);
+
     // بن کردن از تمام گروه‌های دیگر
     for (const groupId of otherGroups) {
         try {
             await bot.telegram.banChatMember(groupId, user.id);
+            console.log(`✅ کاربر ${user.id} از گروه ${groupId} بن شد`);
         } catch (error) {
             // ممکن است کاربر در گروه نباشد
         }
@@ -232,14 +293,24 @@ async function startBot() {
         await bot.launch();
         console.log('🤖 ربات نینجای چهار راه‌اندازی شد');
         console.log('📍 منتظر دستور "شروع" از طرف مالک...');
+        console.log(`👤 مالک: ${OWNER_ID}`);
+        console.log(`🚪 گروه دروازه: ${GATEWAY_GROUP_ID}`);
+        console.log(`🔒 تعداد گروه‌های تحت حفاظت: ${otherGroups.length}`);
+        
     } catch (error) {
-        console.error('خطا در راه‌اندازی ربات:', error);
+        console.error('❌ خطا در راه‌اندازی ربات:', error);
     }
 }
 
 // مدیریت خاموشی
-process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));
+process.once('SIGINT', () => {
+    console.log('🛑 ربات در حال خاموش شدن...');
+    bot.stop('SIGINT');
+});
+process.once('SIGTERM', () => {
+    console.log('🛑 ربات در حال خاموش شدن...');
+    bot.stop('SIGTERM');
+});
 
 // صادر کردن توابع برای استفاده در فایل‌های دیگر
 module.exports = {
