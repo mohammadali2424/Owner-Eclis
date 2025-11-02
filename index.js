@@ -38,22 +38,12 @@ let approvedUsers = new Set();
 let pendingApprovals = new Map();
 let stickers = new Map();
 
-// لیست گروه‌ها و کانال‌های زیرمجموعه
+// لیست گروه‌ها و کانال‌های زیرمجموعه - اینجا رو پر کنید
 let otherGroups = [
-    -1002000000001, // گروه نمونه 1
-    -1002000000002, // گروه نمونه 2
-    -1002000000003, // کانال نمونه 1
-    // بقیه گروه‌ها و کانال‌ها رو اینجا اضافه کنید
+    -1003147693863, // گروه نمونه 1 - آیدی واقعی رو وارد کنید
+    -1002842462894, // گروه نمونه 2 - آیدی واقعی رو وارد کنید
+    -1002929172320, // کانال نمونه 1 - آیدی واقعی رو وارد کنید
 ];
-
-// اطلاعات گروه‌ها برای نمایش در لیست
-let groupInfo = new Map([
-    [-1002483328877, "🎯 گروه دروازه اکلیس"],
-    [-1003147693863, "🛡️ منطقه امنیتی ۱"],
-    [-1002929172320, "🔒 منطقه امنیتی ۲"],
-    [-1002000000003, "📢 کانال اصلی اکلیس"]
-    // اطلاعات بقیه گروه‌ها رو اینجا اضافه کنید
-]);
 
 // تابع برای ذخیره استیکر در دیتابیس
 async function saveSticker(type, fileId) {
@@ -90,176 +80,6 @@ async function loadStickers() {
     }
 }
 
-// ارسال استیکر بر اساس نوع
-async function sendSticker(ctx, type, chatId = null) {
-    const fileId = stickers.get(type);
-    if (fileId) {
-        if (chatId) {
-            await bot.telegram.sendSticker(chatId, fileId);
-        } else {
-            await ctx.replyWithSticker(fileId);
-        }
-    }
-}
-
-// ========================== دستورات جدید ==========================
-
-// دستور "لیست استیکرها"
-bot.hears('لیست استیکرها', async (ctx) => {
-    if (ctx.from.id !== OWNER_ID) return;
-    
-    const stickerTypes = [
-        { name: 'شروع', key: 'start' },
-        { name: 'خوش آمدگویی', key: 'welcome' },
-        { name: 'رد کاربر', key: 'reject' },
-        { name: 'نفوذی', key: 'intruder' },
-        { name: 'کشته شد', key: 'killed' },
-        { name: 'بررسی مناطق', key: 'check_areas' }
-    ];
-    
-    let message = '📋 لیست استیکرهای تنظیم شده:\n\n';
-    
-    stickerTypes.forEach(type => {
-        const status = stickers.has(type.key) ? '✅' : '❌';
-        message += `${status} ${type.name}\n`;
-    });
-    
-    message += '\n✅ = تنظیم شده\n❌ = تنظیم نشده';
-    
-    await ctx.reply(message);
-});
-
-// دستور "بررسی مناطق"
-bot.hears('بررسی مناطق', async (ctx) => {
-    if (ctx.from.id !== OWNER_ID) return;
-    
-    const allGroups = [GATEWAY_GROUP_ID, ...otherGroups];
-    let successCount = 0;
-    let failCount = 0;
-    
-    await ctx.reply('🔍 در حال بررسی مناطق تحت حفاظت...');
-    
-    for (const groupId of allGroups) {
-        try {
-            await bot.telegram.sendMessage(groupId, '🛡️ این منطقه تحت نظارت منه');
-            await sendSticker(ctx, 'check_areas', groupId);
-            successCount++;
-            console.log(`✅ پیام نظارت به گروه ${groupId} ارسال شد`);
-        } catch (error) {
-            failCount++;
-            console.error(`❌ خطا در ارسال به گروه ${groupId}:`, error);
-        }
-        
-        // تأخیر بین ارسال پیام‌ها
-        await new Promise(resolve => setTimeout(resolve, 1000));
-    }
-    
-    await ctx.reply(`📊 نتیجه بررسی مناطق:\n✅ موفق: ${successCount} منطقه\n❌ ناموفق: ${failCount} منطقه`);
-});
-
-// دستور "لیست مناطق" - فقط در گروه دروازه
-bot.hears('لیست مناطق', async (ctx) => {
-    if (ctx.from.id !== OWNER_ID) return;
-    if (ctx.chat.id !== GATEWAY_GROUP_ID) {
-        await ctx.reply('❌ این دستور فقط در گروه دروازه قابل استفاده است');
-        return;
-    }
-    
-    let message = '🗺️ مناطق تحت حفاظت من:\n\n';
-    
-    // گروه دروازه
-    const gatewayInfo = groupInfo.get(GATEWAY_GROUP_ID) || `گروه دروازه (${GATEWAY_GROUP_ID})`;
-    message += `🎯 ${gatewayInfo}\n`;
-    
-    // گروه‌های دیگر
-    otherGroups.forEach(groupId => {
-        const info = groupInfo.get(groupId) || `گروه ${groupId}`;
-        message += `🛡️ ${info}\n`;
-    });
-    
-    message += `\n📊 تعداد کل مناطق: ${otherGroups.length + 1}`;
-    
-    await ctx.reply(message);
-});
-
-// ========================== بهبود دستور بن ==========================
-
-// مدیریت پیام‌های حاوی "بن"
-bot.hears(/^بن$/, async (ctx) => {
-    if (ctx.from.id !== OWNER_ID) return;
-    
-    if (!ctx.message.reply_to_message) {
-        await ctx.reply('⚠️ لطفا روی پیام کاربر ریپلای کنید و سپس "بن" را ارسال کنید');
-        return;
-    }
-    
-    const targetUser = ctx.message.reply_to_message.from;
-    await banUserFromAllGroups(targetUser, ctx);
-});
-
-// بهبود دستور بن با یوزرنیم
-bot.hears(/^بن @(\w+)$/, async (ctx) => {
-    if (ctx.from.id !== OWNER_ID) return;
-    
-    const username = ctx.match[1];
-    await ctx.reply('⚠️ این قابلیت در حال حاضر پشتیبانی نمی‌شود. لطفا از روش ریپلای استفاده کنید.');
-});
-
-// تابع بهبود یافته بن کردن کاربر از تمام گروه‌ها
-async function banUserFromAllGroups(user, ctx) {
-    const userName = user.first_name + (user.last_name ? ' ' + user.last_name : '');
-    const userId = user.id;
-    
-    // بررسی اگر کاربر مدیر است
-    try {
-        const chatMember = await bot.telegram.getChatMember(ctx.chat.id, userId);
-        if (['administrator', 'creator'].includes(chatMember.status)) {
-            console.log(`⚠️ کاربر ${userName} مدیر است، بن انجام نشد`);
-            return; // بدون بن کردن مدیران
-        }
-    } catch (error) {
-        console.error('خطا در بررسی وضعیت کاربر:', error);
-    }
-    
-    try {
-        const allGroups = [GATEWAY_GROUP_ID, ...otherGroups];
-        let banCount = 0;
-        
-        // بن کردن از تمام گروه‌ها
-        for (const groupId of allGroups) {
-            try {
-                await bot.telegram.banChatMember(groupId, userId);
-                banCount++;
-                console.log(`✅ کاربر ${userId} از گروه ${groupId} بن شد`);
-            } catch (error) {
-                // ممکن است کاربر در گروه نباشد یا دسترسی不足 باشد
-            }
-        }
-        
-        approvedUsers.delete(userId);
-        pendingApprovals.delete(userId);
-        
-        // ارسال پیام "کشته شد" با استیکر
-        const killMessage = `☠️ ${userName} با موفقیت کشته شد...`;
-        
-        // ارسال پیام به مالک با ریپلای
-        await ctx.reply(killMessage, {
-            reply_to_message_id: ctx.message.message_id
-        });
-        
-        // ارسال استیکر
-        await sendSticker(ctx, 'killed');
-        
-        console.log(`✅ کاربر ${userName} از ${banCount} گروه بن شد`);
-        
-    } catch (error) {
-        await ctx.reply('❌ خطا در بن کردن کاربر');
-        console.error('خطا در بن کردن کاربر:', error);
-    }
-}
-
-// ========================== بقیه توابع بدون تغییر ==========================
-
 // دستور برای تنظیم استیکر
 bot.command('setsticker', async (ctx) => {
     if (ctx.from.id !== OWNER_ID) {
@@ -268,7 +88,7 @@ bot.command('setsticker', async (ctx) => {
 
     const args = ctx.message.text.split(' ');
     if (args.length < 3) {
-        return ctx.reply('⚠️ فرمت دستور:\n/setsticker [نوع] [ریپلای روی استیکر]\n\nانواع استیکر:\nstart - شروع\nwelcome - خوش آمدگویی\nreject - رد کاربر\nintruder - نفوذی\nkilled - کشته شد\ncheck_areas - بررسی مناطق');
+        return ctx.reply('⚠️ فرمت دستور:\n/setsticker [نوع] [ریپلای روی استیکر]\n\nانواع استیکر:\nstart - شروع\nwelcome - خوش آمدگویی\nreject - رد کاربر\nintruder - نفوذی\nkill - کشتن کاربر');
     }
 
     const type = args[1];
@@ -286,16 +106,93 @@ bot.command('setsticker', async (ctx) => {
     }
 });
 
-// مدیریت دستور "شروع"
+// دستور لیست استیکرها
+bot.hears('لیست استیکرها', async (ctx) => {
+    if (ctx.from.id !== OWNER_ID) return;
+
+    const stickerTypes = [
+        { name: 'شروع', key: 'start' },
+        { name: 'خوش آمدگویی', key: 'welcome' },
+        { name: 'رد کاربر', key: 'reject' },
+        { name: 'نفوذی', key: 'intruder' },
+        { name: 'کشتن کاربر', key: 'kill' }
+    ];
+
+    let message = '📋 لیست استیکرهای تنظیم شده:\n\n';
+    
+    stickerTypes.forEach(type => {
+        const hasSticker = stickers.has(type.key);
+        message += `${hasSticker ? '✅' : '❌'} ${type.name}\n`;
+    });
+
+    message += '\n💡 برای تنظیم استیکر از دستور /setsticker استفاده کنید';
+    await ctx.reply(message);
+});
+
+// ارسال استیکر بر اساس نوع
+async function sendSticker(ctx, type) {
+    const fileId = stickers.get(type);
+    if (fileId) {
+        if (typeof ctx.replyWithSticker === 'function') {
+            await ctx.replyWithSticker(fileId);
+        } else {
+            // اگر ctx مستقیم نبود، از bot.telegram استفاده کن
+            await bot.telegram.sendSticker(ctx.chat?.id || OWNER_ID, fileId);
+        }
+    }
+}
+
+// مدیریت دستور "شروع" - فقط برای مالک
 bot.hears('شروع', async (ctx) => {
     if (ctx.from.id === OWNER_ID) {
         const message = await ctx.reply('نینجای چهار در خدمت شماست', {
             reply_to_message_id: ctx.message.message_id
         });
         
+        // ارسال استیکر شروع
         await sendSticker(ctx, 'start');
+        
         console.log('✅ ربات توسط مالک فعال شد');
     }
+});
+
+// دستور بررسی مناطق
+bot.hears('بررسی مناطق', async (ctx) => {
+    if (ctx.from.id !== OWNER_ID) return;
+
+    await ctx.reply('🔍 در حال بررسی مناطق تحت حفاظت...');
+
+    // ارسال پیام به تمام گروه‌ها
+    const allGroups = [GATEWAY_GROUP_ID, ...otherGroups];
+    
+    for (const groupId of allGroups) {
+        try {
+            await bot.telegram.sendMessage(groupId, '🛡️ این منطقه تحت نظارت منه');
+            await sendSticker({ chat: { id: groupId } }, 'start');
+            console.log(`✅ پیام به گروه ${groupId} ارسال شد`);
+        } catch (error) {
+            console.error(`❌ خطا در ارسال به گروه ${groupId}:`, error.message);
+        }
+    }
+
+    await ctx.reply('✅ بررسی مناطق کامل شد');
+});
+
+// دستور لیست مناطق
+bot.hears('لیست مناطق', async (ctx) => {
+    // فقط در گروه دروازه کار می‌کند
+    if (ctx.chat.id !== GATEWAY_GROUP_ID) return;
+
+    let message = '🗺️ مناطق تحت حفاظت من:\n\n';
+    message += `🏰 گروه دروازه (اصلی)\n`;
+
+    otherGroups.forEach((groupId, index) => {
+        message += `🛡️ منطقه ${index + 1} - آیدی: ${groupId}\n`;
+    });
+
+    message += `\n📊 تعداد کل مناطق: ${otherGroups.length + 1}`;
+    
+    await ctx.reply(message);
 });
 
 // وقتی کاربر جدید به گروه دروازه می‌پیوندد
@@ -306,37 +203,52 @@ bot.on('chat_member', async (ctx) => {
     const oldStatus = chatMember.old_chat_member.status;
     const newStatus = chatMember.new_chat_member.status;
 
+    // اگر کاربر جدید به گروه دروازه پیوست
     if (chatId === GATEWAY_GROUP_ID && 
         (newStatus === 'member' || newStatus === 'administrator') && 
         (oldStatus === 'left' || oldStatus === 'kicked')) {
+        
         await handleNewUserInGateway(user);
     }
     
+    // اگر کاربر از گروه دروازه خارج شد
     if (chatId === GATEWAY_GROUP_ID && 
         (newStatus === 'left' || newStatus === 'kicked') && 
         (oldStatus === 'member' || oldStatus === 'administrator')) {
+        
         await handleUserLeftGateway(user);
     }
     
+    // اگر کاربر به گروه‌های دیگر پیوست
     if (otherGroups.includes(chatId) && 
         (newStatus === 'member' || newStatus === 'administrator')) {
+        
         await handleUserInOtherGroups(user, chatId);
     }
 });
 
 // مدیریت کاربر جدید در دروازه
 async function handleNewUserInGateway(user) {
+    // چک کن اگر کاربر مدیر است، نیاز به تایید ندارد
+    if (user.id === OWNER_ID) {
+        approvedUsers.add(user.id);
+        return;
+    }
+
     const userName = user.first_name + (user.last_name ? ' ' + user.last_name : '');
+    const username = user.username ? '@' + user.username : 'بدون یوزرنیم';
     
     const messageText = `مسافر ${userName} وارد هال اکلیس شد\n\nارباب این شخص اجازه ورود به اکلیس رو داره؟`;
     
+    // ذخیره کاربر در انتظار تایید
     pendingApprovals.set(user.id, {
         userName,
-        username: user.username ? '@' + user.username : 'بدون یوزرنیم',
+        username,
         userId: user.id,
         joinTime: new Date()
     });
     
+    // ارسال پیام به مالک
     await bot.telegram.sendMessage(
         OWNER_ID,
         messageText,
@@ -352,6 +264,7 @@ async function handleNewUserInGateway(user) {
         }
     );
     
+    // ارسال پیام به گروه دروازه
     await bot.telegram.sendMessage(
         GATEWAY_GROUP_ID,
         `👤 مسافر ${userName} وارد هال شد...`
@@ -389,15 +302,16 @@ async function approveUser(userId, ctx) {
     pendingApprovals.delete(userId);
     
     await ctx.answerCbQuery('✅ کاربر تایید شد');
-    await ctx.editMessageText(`✅ مسافر ${userData.userName} تایید ��د`);
+    await ctx.editMessageText(`✅ مسافر ${userData.userName} تایید شد`);
     
+    // ارسال پیام خوش آمدگویی
     await bot.telegram.sendMessage(
         GATEWAY_GROUP_ID,
         `🎉 مسافر ${userData.userName} به جهان بزرگ اکلیس خوش اومدی`
     );
     
-    const stickerCtx = { replyWithSticker: (fileId) => bot.telegram.sendSticker(GATEWAY_GROUP_ID, fileId) };
-    await sendSticker(stickerCtx, 'welcome');
+    // ارسال استیکر خوش آمدگویی
+    await sendSticker({ chat: { id: GATEWAY_GROUP_ID } }, 'welcome');
     
     console.log(`✅ کاربر ${userId} تایید شد`);
 }
@@ -412,13 +326,14 @@ async function rejectUser(userId, ctx) {
     
     pendingApprovals.delete(userId);
     
+    // بن کردن از گروه دروازه
     try {
         await bot.telegram.banChatMember(GATEWAY_GROUP_ID, userId);
         await ctx.answerCbQuery('❌ کاربر بن شد');
         await ctx.editMessageText(`❌ ${userData.userName} از اکلیس بیرون رانده شد`);
         
-        const stickerCtx = { replyWithSticker: (fileId) => bot.telegram.sendSticker(OWNER_ID, fileId) };
-        await sendSticker(stickerCtx, 'reject');
+        // ارسال استیکر رد
+        await sendSticker(ctx, 'reject');
         
         console.log(`❌ کاربر ${userId} بن شد`);
     } catch (error) {
@@ -428,6 +343,9 @@ async function rejectUser(userId, ctx) {
 
 // مدیریت کاربر در گروه‌های دیگر
 async function handleUserInOtherGroups(user, groupId) {
+    // اگر کاربر مالک است، اجازه دسترسی دارد
+    if (user.id === OWNER_ID) return;
+
     if (!approvedUsers.has(user.id) || !(await checkUserInGateway(user.id))) {
         await banIntruder(user, groupId);
     }
@@ -439,14 +357,16 @@ async function banIntruder(user, groupId) {
     const joinTime = new Date().toLocaleString('fa-IR');
     
     try {
+        // بن کردن از گروه
         await bot.telegram.banChatMember(groupId, user.id);
         
+        // ارسال گزارش
         const report = `🚨 مکرد مشکوک ${userName} در منطقه ${groupId} در تاریخ ${joinTime} قصد نفوذ داشت ، که با موفقیت پیدا ، شکار و کشته شد`;
         
         await bot.telegram.sendMessage(OWNER_ID, report);
         
-        const stickerCtx = { replyWithSticker: (fileId) => bot.telegram.sendSticker(OWNER_ID, fileId) };
-        await sendSticker(stickerCtx, 'intruder');
+        // ارسال استیکر نفوذی
+        await sendSticker({ chat: { id: OWNER_ID } }, 'intruder');
         
         console.log(`🚨 نفوذی ${user.id} در گروه ${groupId} شناسایی و بن شد`);
     } catch (error) {
@@ -456,9 +376,13 @@ async function banIntruder(user, groupId) {
 
 // مدیریت خروج کاربر از دروازه
 async function handleUserLeftGateway(user) {
+    // اگر کاربر مالک است، کاری نکن
+    if (user.id === OWNER_ID) return;
+
     approvedUsers.delete(user.id);
     pendingApprovals.delete(user.id);
     
+    // بن کردن از تمام گروه‌های دیگر
     for (const groupId of otherGroups) {
         try {
             await bot.telegram.banChatMember(groupId, user.id);
@@ -480,16 +404,113 @@ async function checkUserInGateway(userId) {
     }
 }
 
+// دستور بن با ریپلای
+bot.on('message', async (ctx) => {
+    if (ctx.from.id !== OWNER_ID) return;
+    
+    const message = ctx.message.text;
+    
+    // اگر پیام حاوی "بن" باشد و ریپلای شده باشد
+    if (message && message.includes('بن') && ctx.message.reply_to_message) {
+        const targetUser = ctx.message.reply_to_message.from;
+        
+        // اگر کاربر مدیر است، بن نکن
+        if (targetUser.id === OWNER_ID) {
+            return;
+        }
+        
+        await banUserFromAllGroups(targetUser, ctx);
+        return;
+    }
+    
+    // اگر پیام حاوی "بن @" باشد (بن با یوزرنیم)
+    if (message && message.startsWith('بن @')) {
+        const username = message.split(' ')[0].replace('بن @', '').trim();
+        await banUserByUsername(username, ctx);
+        return;
+    }
+});
+
+// بن کردن کاربر با یوزرنیم
+async function banUserByUsername(username, ctx) {
+    try {
+        // این یک روش ساده است - در عمل ممکن است نیاز به روش پیچیده‌تری باشد
+        await ctx.reply(`🔍 در جستجوی کاربر @${username}...`);
+        
+        // اینجا باید منطق پیدا کردن کاربر با یوزرنیم را پیاده‌سازی کنید
+        // برای سادگی، فعلاً پیام می‌دهیم که از ریپلای استفاده شود
+        await ctx.reply('⚠️ برای بن کردن با یوزرنیم، لطفاً از ریپلای روی پیام کاربر استفاده کنید.\n\nروی پیام کاربر ریپلای کنید و بنویسید: "بن"');
+        
+    } catch (error) {
+        console.error('خطا در بن کردن با یوزرنیم:', error);
+        await ctx.reply('❌ خطا در بن کردن کاربر');
+    }
+}
+
+// بن کردن کاربر از تمام گروه‌ها
+async function banUserFromAllGroups(user, ctx) {
+    const userName = user.first_name + (user.last_name ? ' ' + user.last_name : '');
+    
+    try {
+        // بن کردن از گروه دروازه
+        await bot.telegram.banChatMember(GATEWAY_GROUP_ID, user.id);
+        
+        // بن کردن از تمام گروه‌های دیگر
+        for (const groupId of otherGroups) {
+            try {
+                await bot.telegram.banChatMember(groupId, user.id);
+            } catch (error) {
+                // ممکن است کاربر در گروه نباشد
+            }
+        }
+        
+        approvedUsers.delete(user.id);
+        pendingApprovals.delete(user.id);
+        
+        // ارسال پیام تأیید با ریپلای
+        const replyMessage = await ctx.reply(`✅ ${userName} با موفقیت کشته شد...`, {
+            reply_to_message_id: ctx.message.message_id
+        });
+        
+        // ارسال استیکر
+        await sendSticker(ctx, 'kill');
+        
+        console.log(`✅ کاربر ${user.id} از تمام گروه‌ها بن شد`);
+    } catch (error) {
+        await ctx.reply('❌ خطا در بن کردن کاربر');
+        console.error('خطا در بن کردن کاربر:', error);
+    }
+}
+
+// تابع برای اضافه کردن گروه جدید
+function addGroup(groupId) {
+    if (!otherGroups.includes(groupId)) {
+        otherGroups.push(groupId);
+        console.log(`✅ گروه جدید اضافه شد: ${groupId}`);
+    }
+}
+
+// تابع برای حذف گروه
+function removeGroup(groupId) {
+    otherGroups = otherGroups.filter(id => id !== groupId);
+    console.log(`❌ گروه حذف شد: ${groupId}`);
+}
+
 // راه‌اندازی ربات
 async function startBot() {
     try {
+        // بارگذاری استیکرها از دیتابیس
         await loadStickers();
+        
         await bot.launch();
         console.log('🤖 ربات نینجای چهار راه‌اندازی شد');
         console.log('📍 منتظر فعالیت...');
         console.log(`👤 مالک: ${OWNER_ID}`);
         console.log(`🚪 گروه دروازه: ${GATEWAY_GROUP_ID}`);
         console.log(`🔒 تعداد گروه‌های تحت حفاظت: ${otherGroups.length}`);
+        
+        // ارسال پیام شروع به مالک
+        await bot.telegram.sendMessage(OWNER_ID, '🛡️ ربات نینجای چهار فعال شد و آماده خدمت‌رسانی است');
         
     } catch (error) {
         console.error('❌ خطا در راه‌اندازی ربات:', error);
