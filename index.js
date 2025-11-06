@@ -1,11 +1,9 @@
-require('dotenv').config(); // بارگذاری متغیرهای محیطی از فایل .env
-
 const { Telegraf } = require('telegraf');
 const { createClient } = require('@supabase/supabase-js');
 const http = require('http');
 const express = require('express');
 
-// تنظیمات از متغیرهای محیطی
+// اطلاعات توکن و کلید از متغیرهای محیطی
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_KEY;
@@ -43,14 +41,7 @@ setInterval(() => {
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 const bot = new Telegraf(BOT_TOKEN);
 
-// مدیریت خطاهای Supabase
-supabase.auth.onAuthStateChange((event, session) => {
-    if (event === 'SIGNED_OUT') {
-        console.error('❌ اتصال به Supabase قطع شد');
-    }
-});
-
-// ========================== سیستم ذخیره‌سازی دیتابیس ==========================
+// ذخیره استیکر
 async function saveSticker(type, fileId) {
     try {
         const { data, error } = await supabase
@@ -69,137 +60,142 @@ async function saveSticker(type, fileId) {
     }
 }
 
-// تابع برای ذخیره گروه به عنوان گروه تحت حفاظت به طور خودکار
-async function addGroupToProtectedList(groupId, groupName = null) {
-    try {
-        const { error } = await supabase
-            .from('protected_groups')
-            .upsert({
-                group_id: groupId,
-                group_name: groupName,
-                added_at: new Date().toISOString(),
-                added_by: OWNER_ID
-            });
-        
-        if (error) throw error;
-        return true;
-    } catch (error) {
-        console.error('خطا در اضافه کردن گروه به لیست محافظت شده:', error);
-        return false;
-    }
-}
-
-// تابع برای اضافه کردن گروه به لیست محافظت شده زمانی که ربات به گروه اضافه می‌شود
-bot.on('chat_member', async (ctx) => {
-    try {
-        const chatMember = ctx.chatMember;
-        const user = chatMember.new_chat_member.user;
-        const chatId = chatMember.chat.id;
-        const newStatus = chatMember.new_chat_member.status;
-
-        // اگر گروه جدید به گروه دروازه یا گروه جدیدی اضافه شد
-        if (newStatus === 'member' || newStatus === 'administrator') {
-            const group = await bot.telegram.getChat(chatId);
-            await addGroupToProtectedList(chatId, group.title);
-            console.log(`✅ گروه جدید به زیرمجموعه‌ها اضافه شد: ${group.title}`);
-        }
-    } catch (error) {
-        console.error('خطا در مدیریت اضافه شدن گروه:', error);
-    }
-});
-
-// ========================== عملکردهای اصلی ربات ==========================
+// ارسال استیکر
 async function sendSticker(chatId, type) {
     try {
-        const fileId = await getSticker(type);
-        if (!fileId) {
+        const { data, error } = await supabase
+            .from('stickers')
+            .select('file_id')
+            .eq('type', type)
+            .single();
+        
+        if (error || !data) {
             console.warn(`⚠️ استیکر ${type} تنظیم نشده است`);
             return false;
         }
         
-        await bot.telegram.sendSticker(chatId, fileId);
+        await bot.telegram.sendSticker(chatId, data.file_id);
         return true;
     } catch (error) {
-        console.error(`❌ خطا در ارسال استیکر ${type}:`, error.message);
+        console.error('خطا در ارسال استیکر:', error);
         return false;
     }
 }
 
-// ========================== دستورات مدیریتی ==========================
-bot.command('setsticker', async (ctx) => {
-    if (ctx.from.id !== OWNER_ID) {
-        return await ctx.reply('❌ فقط مالک می‌تواند استیکر تنظیم کند');
-    }
-
-    const args = ctx.message.text.split(' ');
-    if (args.length < 2) {
-        return await ctx.reply('⚠️ فرمت دستور:\n/setsticker [نوع]\n\nانواع استیکر:\n• start - شروع\n• welcome - خوش آمدگویی\n• reject - رد کاربر\n• intruder - نفوذی\n• kill - کشتن کاربر\n• areas - مناطق');
-    }
-
-    const type = args[1];
-    const validTypes = ['start', 'welcome', 'reject', 'intruder', 'kill', 'areas'];
-    
-    if (!validTypes.includes(type)) {
-        return await ctx.reply(`❌ نوع استیکر نامعتبر است\n\nانواع مجاز: ${validTypes.join(', ')}`);
-    }
-
-    if (!ctx.message.reply_to_message || !ctx.message.reply_to_message.sticker) {
-        return await ctx.reply('❌ لطفا روی یک استیکر ریپلای کنید');
-    }
-
-    const fileId = ctx.message.reply_to_message.sticker.file_id;
-    const success = await saveSticker(type, fileId);
-
-    if (success) {
-        await ctx.reply(`✅ استیکر ${type} با موفقیت ذخیره شد`);
-    } else {
-        await ctx.reply('❌ خطا در ذخیره استیکر');
+// وقتی مالک پیام "شروع" ارسال می‌کند
+bot.hears('شروع', async (ctx) => {
+    if (ctx.from.id === OWNER_ID) {
+        // ارسال پیام "در خدمت شمام ارباب"
+        await ctx.reply('در خدمت شمام ارباب');
+        // ارسال استیکر قابل تنظیم
+        await sendSticker(ctx.chat.id, 'start');
     }
 });
 
-// ========================== راه‌اندازی ربات ==========================
-async function initializeBot() {
-    try {
-        console.log('🔧 در حال راه‌اندازی ربات...');
+// بررسی ورود کاربر به گروه دروازه
+bot.on('chat_member', async (ctx) => {
+    const chatMember = ctx.chatMember;
+    const user = chatMember.new_chat_member.user;
+    const chatId = chatMember.chat.id;
+    const newStatus = chatMember.new_chat_member.status;
 
-        // بررسی اتصال به دیتابیس
-        const { data: stickers, error } = await supabase
-            .from('stickers')
-            .select('type')
-            .limit(1);
+    if (chatId === GATEWAY_GROUP_ID && (newStatus === 'member' || newStatus === 'administrator')) {
+        // زمانی که کاربر وارد گروه دروازه می‌شود
+        const userName = user.first_name + (user.last_name ? ' ' + user.last_name : '');
+        const message = `مسافر ${userName} وارد اکلیس شد\nارباب ${userName} آیا این غریبه اجازه ورود به اکلیس رو داره؟`;
         
-        if (error) {
-            throw new Error(`خطا در اتصال به دیتابیس: ${error.message}`);
+        const sentMessage = await bot.telegram.sendMessage(OWNER_ID, message, {
+            reply_markup: {
+                inline_keyboard: [
+                    [
+                        { text: 'آره ، میتونه وارد شه', callback_data: `approve_${user.id}` },
+                        { text: 'نه ، اجازه ورود نداره', callback_data: `reject_${user.id}` }
+                    ]
+                ]
+            }
+        });
+
+        // ذخیره کردن پیام تایید
+        await savePendingApproval(user.id, { userName, username: user.username }, sentMessage.message_id);
+    }
+});
+
+// تایید یا رد کاربر
+bot.on('callback_query', async (ctx) => {
+    try {
+        const data = ctx.callbackQuery.data;
+        const userId = parseInt(data.split('_')[1]);
+
+        if (data.startsWith('approve_')) {
+            // تایید کاربر
+            const userData = await getPendingApproval(userId);
+            await saveApprovedUser(userId, userData);
+            await removePendingApproval(userId);
+
+            // خوش آمدگویی
+            await bot.telegram.sendMessage(GATEWAY_GROUP_ID, `مسافر ${userData.user_name} به جهان بزرگ اکلیس خوش آمدید!`);
+            await sendSticker(GATEWAY_GROUP_ID, 'welcome');
+        } else if (data.startsWith('reject_')) {
+            // رد کاربر و بن کردن
+            await bot.telegram.banChatMember(GATEWAY_GROUP_ID, userId);
+            await removePendingApproval(userId);
+
+            await bot.telegram.sendMessage(GATEWAY_GROUP_ID, `غریبه ${userData.user_name} از هال اکلیس بیرون رانده شد`);
+            await sendSticker(GATEWAY_GROUP_ID, 'reject');
+        }
+        
+        await ctx.answerCbQuery();
+    } catch (error) {
+        console.error('خطا در مدیریت callback_query:', error);
+    }
+});
+
+// مدیریت پیام‌های قبل از تایید
+bot.on('message', async (ctx) => {
+    const userId = ctx.from.id;
+    const userData = await getPendingApproval(userId);
+
+    if (userData) {
+        // کاربر تایید نشده است
+        await ctx.deleteMessage();
+        await ctx.reply(`مسافر ${userData.user_name} شما تا قبل از تایید ارباب اجازه انجام هیچ حرکتیو نداری`);
+        await bot.telegram.restrictChatMember(ctx.chat.id, userId, { can_send_messages: false });
+    }
+});
+
+// حذف کاربر از همه گروه‌ها وقتی از دروازه لفت می‌دهد
+bot.on('chat_member', async (ctx) => {
+    const chatMember = ctx.chatMember;
+    const user = chatMember.new_chat_member.user;
+    const chatId = chatMember.chat.id;
+    const oldStatus = chatMember.old_chat_member.status;
+    const newStatus = chatMember.new_chat_member.status;
+
+    if (chatId === GATEWAY_GROUP_ID && (oldStatus === 'member' || oldStatus === 'administrator') && newStatus === 'left') {
+        const protectedGroups = await getProtectedGroups();
+        for (const group of protectedGroups) {
+            await bot.telegram.banChatMember(group.group_id, user.id);
         }
 
-        // بررسی اتصال به تلگرام
-        await bot.telegram.getMe();
-        
-        console.log('✅ تمام اتصالات بررسی شدند');
-        return true;
-        
-    } catch (error) {
-        console.error('❌ خطا در راه‌اندازی ربات:', error.message);
-        return false;
+        await bot.telegram.sendMessage(GATEWAY_GROUP_ID, `مسافر ${user.first_name} از اکلیس بیرون رفت و از تمام گروه‌های زیرمجموعه بن شد`);
     }
+});
+
+// مدیریت نفوذی‌ها و ارسال گزارش به گروه
+async function banIntruder(user, groupId) {
+    const userName = user.first_name + (user.last_name ? ' ' + user.last_name : '');
+    const joinTime = new Date().toLocaleString('fa-IR');
+    await bot.telegram.banChatMember(groupId, user.id);
+    
+    const report = `🚨 هشدار امنیتی!\n\n👤 کاربر: ${userName}\n🆔 آیدی: ${user.id}\n⏰ زمان: ${joinTime}\n\nاین کاربر بدون عبور از دروازه اصلی قصد نفوذ داشت که شکار و حذف شد.`;
+    await bot.telegram.sendMessage(OWNER_ID, report);
+    await sendSticker(OWNER_ID, 'intruder');
 }
 
-// راه‌اندازی ربات
+// شروع ربات
 async function startBot() {
-    try {
-        const initialized = await initializeBot();
-        if (!initialized) {
-            throw new Error('خطا در راه‌اندازی اولیه ربات');
-        }
-        
-        await bot.launch();
-        console.log('🤖 ربات نینجای چهار راه‌اندازی شد');
-        console.log('📍 منتظر فعالیت...');
-    } catch (error) {
-        console.error('❌ خطا در راه‌اندازی ربات:', error);
-        process.exit(1);
-    }
+    await bot.launch();
+    console.log('🤖 ربات نینجای چهار راه‌اندازی شد');
 }
 
 startBot();
-
