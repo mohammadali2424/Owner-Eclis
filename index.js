@@ -157,17 +157,6 @@ async function removePendingApproval(userId) {
     }
 }
 
-// بررسی دسترسی ربات در گروه‌ها
-async function checkBotPermissions(groupId) {
-    try {
-        const chatMember = await bot.telegram.getChatMember(groupId, bot.botInfo.id);
-        return chatMember.can_restrict_members && chatMember.can_delete_messages;
-    } catch (error) {
-        console.error(`❌ خطا در بررسی دسترسی ربات در گروه ${groupId}:`, error.message);
-        return false;
-    }
-}
-
 // ========================== دستورات اصلی ربات ==========================
 
 // وقتی مالک پیام "شروع" ارسال می‌کند
@@ -286,6 +275,47 @@ async function banIntruder(user, groupId) {
     await bot.telegram.sendMessage(OWNER_ID, report);
     await sendSticker(OWNER_ID, 'intruder');
 }
+
+// دستور لیست استیکرها
+bot.command('liststickers', async (ctx) => {
+    if (ctx.from.id !== OWNER_ID) return;
+
+    const stickerTypes = [
+        { name: 'شروع', key: 'start' },
+        { name: 'خوش آمدگویی', key: 'welcome' },
+        { name: 'رد کاربر', key: 'reject' },
+        { name: 'نفوذی', key: 'intruder' },
+        { name: 'کشتن کاربر', key: 'kill' },
+        { name: 'مناطق', key: 'areas' }
+    ];
+
+    let message = '📋 لیست استیکرهای تنظیم شده:\n\n';
+    
+    for (const type of stickerTypes) {
+        const fileId = await getSticker(type.key);
+        message += `${fileId ? '✅' : '❌'} ${type.name} (${type.key})\n`;
+    }
+
+    message += '\n💡 برای تنظیم استیکر از دستور /setsticker [نوع] استفاده کنید';
+    await ctx.reply(message);
+});
+
+// راهنمای دستورات
+bot.command('help', async (ctx) => {
+    const helpText = `
+    📚 راهنمای دستورات ربات:
+
+    /start - شروع ربات
+    /liststickers - نمایش وضعیت استیکرها
+    /setsticker [نوع] - تنظیم استیکر جدید
+    /approvedusers - نمایش لیست کاربران تایید شده
+    /addgroup [گروه] - اضافه کردن گروه به لیست مناطق تحت حفاظت
+    /removegroup [گروه] - حذف گروه از لیست مناطق تحت حفاظت
+    /help - نمایش راهنمای دستورات ربات
+    `;
+    
+    await ctx.reply(helpText);
+});
 
 // شروع ربات
 async function startBot() {
