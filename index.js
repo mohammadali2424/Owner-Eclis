@@ -82,17 +82,110 @@ async function sendSticker(chatId, type) {
     }
 }
 
+// بازیابی اطلاعات کاربر از جدول pending_approvals در Supabase
+async function getPendingApproval(userId) {
+    try {
+        const { data, error } = await supabase
+            .from('pending_approvals')
+            .select('*')
+            .eq('user_id', userId)
+            .single(); // فقط یک رکورد
+
+        if (error) throw error;
+        return data;
+    } catch (error) {
+        console.error('خطا در دریافت کاربر در انتظار تایید:', error);
+        return null;
+    }
+}
+
+// ذخیره‌سازی اطلاعات کاربر تایید شده
+async function saveApprovedUser(userId, userData) {
+    try {
+        const { error } = await supabase
+            .from('approved_users')
+            .upsert({
+                user_id: userId,
+                user_name: userData.userName,
+                username: userData.username,
+                approved_at: new Date().toISOString(),
+                approved_by: OWNER_ID
+            });
+        
+        if (error) throw error;
+        return true;
+    } catch (error) {
+        console.error('خطا در ذخیره کاربر تایید شده:', error);
+        return false;
+    }
+}
+
+// ذخیره‌سازی کاربر در انتظار تایید
+async function savePendingApproval(userId, userData, messageId = null) {
+    try {
+        const { error } = await supabase
+            .from('pending_approvals')
+            .upsert({
+                user_id: userId,
+                user_name: userData.userName,
+                username: userData.username,
+                join_time: new Date().toISOString(),
+                message_id: messageId
+            });
+        
+        if (error) throw error;
+        return true;
+    } catch (error) {
+        console.error('خطا در ذخیره کاربر در انتظار:', error);
+        return false;
+    }
+}
+
+// حذف کاربر از انتظار تایید
+async function removePendingApproval(userId) {
+    try {
+        const { error } = await supabase
+            .from('pending_approvals')
+            .delete()
+            .eq('user_id', userId);
+        
+        if (error) throw error;
+        return true;
+    } catch (error) {
+        console.error('خطا در حذف کاربر از انتظار:', error);
+        return false;
+    }
+}
+
+// بررسی دسترسی ربات در گروه‌ها
+async function checkBotPermissions(groupId) {
+    try {
+        const chatMember = await bot.telegram.getChatMember(groupId, bot.botInfo.id);
+        return chatMember.can_restrict_members && chatMember.can_delete_messages;
+    } catch (error) {
+        console.error(`❌ خطا در بررسی دسترسی ربات در گروه ${groupId}:`, error.message);
+        return false;
+    }
+}
+
+// ========================== دستورات اصلی ربات ==========================
+
 // وقتی مالک پیام "شروع" ارسال می‌کند
 bot.hears('شروع', async (ctx) => {
     if (ctx.from.id === OWNER_ID) {
-        // ارسال پیام "در خدمت شمام ارباب"
-        await ctx.reply('در خدمت شمام ارباب');
-        // ارسال استیکر قابل تنظیم
-        await sendSticker(ctx.chat.id, 'start');
+        // بررسی اینکه آیا پیام مالک ریپلای شده است یا نه
+        if (ctx.message.reply_to_message) {
+            // فقط پیام را ارسال کن، استیکر ارسال نشود
+            await ctx.reply('در خدمت شمام ارباب');
+        } else {
+            // پیام و استیکر را ارسال کن
+            await ctx.reply('در خدمت شمام ارباب');
+            await sendSticker(ctx.chat.id, 'start');
+        }
     }
 });
 
-// بررسی ورود کاربر به گروه دروازه
+// وقتی کاربر وارد گروه دروازه می‌شود
 bot.on('chat_member', async (ctx) => {
     const chatMember = ctx.chatMember;
     const user = chatMember.new_chat_member.user;
@@ -137,6 +230,7 @@ bot.on('callback_query', async (ctx) => {
             await sendSticker(GATEWAY_GROUP_ID, 'welcome');
         } else if (data.startsWith('reject_')) {
             // رد کاربر و بن کردن
+            const userData = await getPendingApproval(userId);
             await bot.telegram.banChatMember(GATEWAY_GROUP_ID, userId);
             await removePendingApproval(userId);
 
@@ -156,8 +250,8 @@ bot.on('message', async (ctx) => {
     const userData = await getPendingApproval(userId);
 
     if (userData) {
-        // کاربر تایید نشده است
-        await ctx.deleteMessage();
+        // اگر کاربر تایید نشده است
+        await ctx.deleteMessage(); // پیام را پاک می‌کنیم
         await ctx.reply(`مسافر ${userData.user_name} شما تا قبل از تایید ارباب اجازه انجام هیچ حرکتیو نداری`);
         await bot.telegram.restrictChatMember(ctx.chat.id, userId, { can_send_messages: false });
     }
@@ -172,6 +266,7 @@ bot.on('chat_member', async (ctx) => {
     const newStatus = chatMember.new_chat_member.status;
 
     if (chatId === GATEWAY_GROUP_ID && (oldStatus === 'member' || oldStatus === 'administrator') && newStatus === 'left') {
+        // زمانی که کاربر گروه دروازه را ترک کرده باشد
         const protectedGroups = await getProtectedGroups();
         for (const group of protectedGroups) {
             await bot.telegram.banChatMember(group.group_id, user.id);
