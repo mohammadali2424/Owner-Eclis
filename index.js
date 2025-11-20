@@ -1,251 +1,205 @@
-const { Telegraf, Markup, session } = require('telegraf');
+const TelegramBot = require('node-telegram-bot-api');
 
-// تنظیمات ربات
-const BOT_TOKEN = process.env.BOT_TOKEN || 'YOUR_BOT_TOKEN_HERE';
-const OWNER_ID = parseInt(process.env.OWNER_ID) || 123456789; // آی‌دی عددی خودت رو اینجا بذار
+const token = 'YOUR_BOT_TOKEN';
+const bot = new TelegramBot(token, { polling: true });
 
-// بررسی تنظیمات
-if (!BOT_TOKEN || BOT_TOKEN === 'YOUR_BOT_TOKEN_HERE') {
-    console.error('❌ BOT_TOKEN را تنظیم کنید');
-    process.exit(1);
+// آیدی گروه مورد نظر - جایگزین کن
+const TARGET_GROUP_ID = '-1002483328877';
+
+// آیدی مالک - جایگزین کن
+const OWNER_ID = '7495437597';
+
+// ذخیره موقت پیام‌ها
+let messageQueue = [];
+
+// بررسی مالک
+function isOwner(userId) {
+    return userId.toString() === OWNER_ID.toString();
 }
 
-if (!OWNER_ID || OWNER_ID === 123456789) {
-    console.error('❌ OWNER_ID را تنظیم کنید');
-    process.exit(1);
-}
+// مدیریت دستور /start
+bot.onText(/\/start/, (msg) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
 
-const bot = new Telegraf(BOT_TOKEN);
-const groups = new Map();
-
-// وضعیت‌های کاربر
-const UserState = {
-    IDLE: 'idle',
-    COMPOSING_MESSAGE: 'composing_message',
-    AWAITING_GROUP_SELECTION: 'awaiting_group_selection'
-};
-
-// استفاده از session
-bot.use(session({ 
-    defaultSession: () => ({ 
-        state: UserState.IDLE,
-        messages: []
-    })
-}));
-
-// راه‌اندازی ربات با هندلینگ خطا
-async function startBot() {
-    try {
-        // حذف webhook قبلی برای جلوگیری از conflict
-        await bot.telegram.deleteWebhook();
-        
-        // راه‌اندازی ربات
-        await bot.launch();
-        console.log('🤖 ربات راه‌اندازی شد!');
-        
-        // هندل graceful shutdown
-        process.once('SIGINT', () => bot.stop('SIGINT'));
-        process.once('SIGTERM', () => bot.stop('SIGTERM'));
-        
-    } catch (error) {
-        if (error.description && error.description.includes('Conflict')) {
-            console.log('⚠️ ربات در جای دیگری در حال اجراست. 10 ثانیه صبر کنید...');
-            await new Promise(resolve => setTimeout(resolve, 10000));
-            return startBot(); // تلاش مجدد
-        }
-        console.error('❌ خطا در راه‌اندازی ربات:', error);
-        process.exit(1);
-    }
-}
-
-// مدیریت شروع
-bot.start(async (ctx) => {
-    if (ctx.from.id === OWNER_ID) {
-        ctx.session.state = UserState.IDLE;
-        ctx.session.messages = [];
-        await showMainMenu(ctx);
-    } else {
-        await ctx.reply('❌ من فقط از اربابم دستور می‌گیرم!');
-    }
-});
-
-// ذخیره گروه‌ها
-bot.on('new_chat_members', async (ctx) => {
-    const botId = ctx.botInfo.id;
-    const isBotAdded = ctx.message.new_chat_members.some(member => member.id === botId);
-    
-    if (isBotAdded) {
-        const chatId = ctx.chat.id;
-        const groupTitle = ctx.chat.title || 'گروه بدون نام';
-        
-        groups.set(chatId, {
-            id: chatId,
-            title: groupTitle
-        });
-        
-        try {
-            await bot.telegram.sendMessage(OWNER_ID, `✅ ربات به گروه "${groupTitle}" اضافه شد`);
-        } catch (error) {
-            console.error('خطا در اطلاع به مالک:', error);
-        }
-    }
-});
-
-// منوی اصلی
-async function showMainMenu(ctx) {
-    const menu = Markup.keyboard([
-        ['📝 شروع کامپوز پیام', '📤 ارسال کامپوز'],
-        ['🗑 پاک کردن کامپوز', '🌐 ارسال فوری به همه']
-    ]).resize();
-    
-    await ctx.reply('🤖 انتخاب کنید:', menu);
-}
-
-// مدیریت پیام‌های مالک
-bot.on('text', async (ctx) => {
-    if (ctx.from.id !== OWNER_ID || ctx.chat.type !== 'private') return;
-
-    const text = ctx.message.text;
-    const session = ctx.session;
-
-    if (session.state === UserState.IDLE) {
-        switch (text) {
-            case '📝 شروع کامپوز پیام':
-                session.state = UserState.COMPOSING_MESSAGE;
-                session.messages = [];
-                await ctx.reply('🎬 در حال کامپوز پیام...\nهر پیامی می‌فرستید ذخیره می‌شود.');
-                break;
-                
-            case '📤 ارسال کامپوز':
-                if (!session.messages || session.messages.length === 0) {
-                    await ctx.reply('⚠️ هیچ پیامی برای ارسال ندارید!');
-                    return;
-                }
-                await showGroupSelection(ctx);
-                break;
-                
-            case '🗑 پاک کردن کامپوز':
-                session.messages = [];
-                await ctx.reply('✅ کامپوز پیام پاک شد');
-                break;
-                
-            case '🌐 ارسال فوری به همه':
-                if (groups.size === 0) {
-                    await ctx.reply('⚠️ ربات به هیچ گروهی اضافه نشده است!');
-                    return;
-                }
-                await forwardToAllGroups(ctx, [ctx.message]);
-                break;
-        }
-    } else if (session.state === UserState.COMPOSING_MESSAGE) {
-        // ذخیره پیام در کامپوز
-        if (!session.messages) session.messages = [];
-        session.messages.push(ctx.message);
-        await ctx.reply(`✅ پیام ذخیره شد (${session.messages.length} پیام)`);
-    }
-});
-
-// مدیریت سایر انواع پیام در حالت کامپوز
-bot.on(['photo', 'sticker', 'document', 'video'], async (ctx) => {
-    if (ctx.from.id !== OWNER_ID || ctx.chat.type !== 'private') return;
-
-    const session = ctx.session;
-    
-    if (session.state === UserState.COMPOSING_MESSAGE) {
-        if (!session.messages) session.messages = [];
-        session.messages.push(ctx.message);
-        await ctx.reply(`✅ پیام ذخیره شد (${session.messages.length} پیام)`);
-    }
-});
-
-// نمایش لیست گروه‌ها برای انتخاب
-async function showGroupSelection(ctx) {
-    if (groups.size === 0) {
-        await ctx.reply('⚠️ ربات به هیچ گروهی اضافه نشده است!');
-        ctx.session.state = UserState.IDLE;
+    if (!isOwner(userId)) {
+        bot.sendMessage(chatId, '🚫 دسترسی denied!');
         return;
     }
 
-    const buttons = [];
-    
-    groups.forEach((group) => {
-        buttons.push([Markup.button.callback(group.title, `send_${group.id}`)]);
-    });
+    const keyboard = {
+        reply_markup: {
+            inline_keyboard: [
+                [{ text: '📤 ارسال به گروه', callback_data: 'send_messages' }],
+                [{ text: '🗑 پاک کردن همه', callback_data: 'clear_messages' }]
+            ]
+        }
+    };
 
-    buttons.push([Markup.button.callback('🌐 ارسال به همه', 'send_all')]);
-
-    await ctx.reply(
-        `🎯 گروه مقصد را انتخاب کنید (${ctx.session.messages.length} پیام):`, 
-        Markup.inlineKeyboard(buttons)
+    bot.sendMessage(chatId, 
+        `📝 هر پیامی می‌فرستی ذخیره میشه (متن، عکس، فیلم، استیکر، فایل)\n\n` +
+        `تعداد پیام‌های ذخیره شده: ${messageQueue.length}\n\n` +
+        `وقتی آماده بودی روی "ارسال به گروه" کلیک کن`,
+        keyboard
     );
-    ctx.session.state = UserState.AWAITING_GROUP_SELECTION;
-}
+});
 
-// ارسال کامپوز به گروه خاص
-async function forwardToGroup(ctx, groupId) {
-    const messages = ctx.session.messages || [];
-    let successCount = 0;
+// مدیریت callback
+bot.on('callback_query', (query) => {
+    const chatId = query.message.chat.id;
+    const userId = query.from.id;
 
-    for (const message of messages) {
-        try {
-            await ctx.telegram.copyMessage(groupId, ctx.chat.id, message.message_id);
-            successCount++;
-            await new Promise(resolve => setTimeout(resolve, 300));
-        } catch (error) {
-            console.error('خطا در ارسال پیام:', error);
-        }
-    }
-
-    await ctx.reply(`✅ ${successCount} از ${messages.length} پیام ارسال شد`);
-    ctx.session.state = UserState.IDLE;
-    ctx.session.messages = [];
-}
-
-// ارسال به همه گروه‌ها
-async function forwardToAllGroups(ctx, messages = null) {
-    const msgs = messages || ctx.session.messages || [];
-    
-    if (groups.size === 0) {
-        await ctx.reply('⚠️ ربات به هیچ گروهی اضافه نشده است!');
+    if (!isOwner(userId)) {
+        bot.answerCallbackQuery(query.id, { text: 'دسترسی denied!' });
         return;
     }
 
-    let totalSent = 0;
-    const totalGroups = groups.size;
+    if (query.data === 'send_messages') {
+        sendAllMessages(chatId);
+    } else if (query.data === 'clear_messages') {
+        messageQueue = [];
+        bot.answerCallbackQuery(query.id, { text: 'همه پیام‌ها پاک شد!' });
+        bot.sendMessage(chatId, '✅ همه پیام‌ها پاک شدند');
+    }
+});
 
-    for (const [groupId] of groups) {
-        try {
-            for (const message of msgs) {
-                await ctx.telegram.copyMessage(groupId, ctx.chat.id, message.message_id);
-                await new Promise(resolve => setTimeout(resolve, 200));
-            }
-            totalSent++;
-        } catch (error) {
-            console.error('خطا در ارسال به گروه:', error);
+// دریافت همه انواع پیام
+bot.on('message', (msg) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+
+    // فقط مالک می‌تواند پیام بفرستد
+    if (!isOwner(userId)) {
+        if (msg.chat.type === 'private') {
+            bot.sendMessage(chatId, '🚫 دسترسی denied!');
         }
+        return;
     }
 
-    await ctx.reply(`📤 ${totalSent} از ${totalGroups} گروه دریافت کردند`);
-    
-    if (!messages) {
-        ctx.session.state = UserState.IDLE;
-        ctx.session.messages = [];
+    // نادیده گرفتن دستور /start
+    if (msg.text && msg.text.startsWith('/')) {
+        return;
+    }
+
+    // ذخیره متن
+    if (msg.text) {
+        messageQueue.push({
+            type: 'text',
+            content: msg.text
+        });
+        bot.sendMessage(chatId, '✅ متن ذخیره شد');
+    }
+    // ذخیره عکس
+    else if (msg.photo) {
+        const photo = msg.photo[msg.photo.length - 1];
+        messageQueue.push({
+            type: 'photo',
+            file_id: photo.file_id,
+            caption: msg.caption || ''
+        });
+        bot.sendMessage(chatId, '✅ عکس ذخیره شد');
+    }
+    // ذخیره فیلم
+    else if (msg.video) {
+        messageQueue.push({
+            type: 'video',
+            file_id: msg.video.file_id,
+            caption: msg.caption || ''
+        });
+        bot.sendMessage(chatId, '✅ فیلم ذخیره شد');
+    }
+    // ذخیره استیکر
+    else if (msg.sticker) {
+        messageQueue.push({
+            type: 'sticker',
+            file_id: msg.sticker.file_id
+        });
+        bot.sendMessage(chatId, '✅ استیکر ذخیره شد');
+    }
+    // ذخیره فایل
+    else if (msg.document) {
+        messageQueue.push({
+            type: 'document',
+            file_id: msg.document.file_id,
+            caption: msg.caption || ''
+        });
+        bot.sendMessage(chatId, '✅ فایل ذخیره شد');
+    }
+    // ذخیره گیف (انیمیشن)
+    else if (msg.animation) {
+        messageQueue.push({
+            type: 'animation',
+            file_id: msg.animation.file_id,
+            caption: msg.caption || ''
+        });
+        bot.sendMessage(chatId, '✅ گیف ذخیره شد');
+    }
+});
+
+// ارسال همه پیام‌ها به گروه
+async function sendAllMessages(chatId) {
+    if (messageQueue.length === 0) {
+        bot.sendMessage(chatId, '❌ هیچ پیامی برای ارسال ندارید!');
+        return;
+    }
+
+    try {
+        // ارسال به گروه
+        for (const item of messageQueue) {
+            switch (item.type) {
+                case 'text':
+                    await bot.sendMessage(TARGET_GROUP_ID, item.content);
+                    break;
+                case 'photo':
+                    await bot.sendPhoto(TARGET_GROUP_ID, item.file_id, {
+                        caption: item.caption
+                    });
+                    break;
+                case 'video':
+                    await bot.sendVideo(TARGET_GROUP_ID, item.file_id, {
+                        caption: item.caption
+                    });
+                    break;
+                case 'sticker':
+                    await bot.sendSticker(TARGET_GROUP_ID, item.file_id);
+                    break;
+                case 'document':
+                    await bot.sendDocument(TARGET_GROUP_ID, item.file_id, {
+                        caption: item.caption
+                    });
+                    break;
+                case 'animation':
+                    await bot.sendAnimation(TARGET_GROUP_ID, item.file_id, {
+                        caption: item.caption
+                    });
+                    break;
+            }
+            
+            // تاخیر کوتاه بین ارسال‌ها
+            await new Promise(resolve => setTimeout(resolve, 500));
+        }
+
+        bot.sendMessage(chatId, `✅ ${messageQueue.length} پیام با موفقیت ارسال شد!`);
+        
+        // پاک کردن صف پس از ارسال موفق
+        messageQueue = [];
+
+    } catch (error) {
+        console.error('خطا در ارسال:', error);
+        bot.sendMessage(chatId, '❌ خطا در ارسال پیام‌ها!');
     }
 }
 
-// مدیریت کلیک روی دکمه‌ها
-bot.action(/send_(-?\d+)/, async (ctx) => {
-    const groupId = ctx.match[1];
-    await forwardToGroup(ctx, groupId);
-    await showMainMenu(ctx);
-    await ctx.answerCbQuery();
+// راه‌اندازی سرور
+const express = require('express');
+const app = express();
+const port = process.env.PORT || 3000;
+
+app.get('/', (req, res) => {
+    res.send('🤖 Bot is running!');
 });
 
-bot.action('send_all', async (ctx) => {
-    await forwardToAllGroups(ctx);
-    await showMainMenu(ctx);
-    await ctx.answerCbQuery();
+app.listen(port, () => {
+    console.log(`✅ ربات فعال شد`);
+    console.log(`🎯 گروه هدف: ${TARGET_GROUP_ID}`);
 });
-
-// شروع ربات
-startBot();
