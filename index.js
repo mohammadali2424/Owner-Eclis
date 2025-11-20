@@ -1,9 +1,20 @@
 const { Telegraf, Markup, session } = require('telegraf');
 const { message } = require('telegraf/filters');
 
-// تنظیمات ربات
-const BOT_TOKEN = 'YOUR_BOT_TOKEN_HERE';
-const OWNER_ID = YOUR_OWNER_USER_ID_HERE; // جایگزین کنید با آی‌دی عددی مالک
+// تنظیمات ربات - این مقادیر باید جایگزین شوند
+const BOT_TOKEN = process.env.BOT_TOKEN || 'YOUR_BOT_TOKEN_HERE';
+const OWNER_ID = parseInt(process.env.OWNER_ID) || 123456789; // جایگزین کنید با آی‌دی عددی مالک
+
+// بررسی وجود توکن
+if (!BOT_TOKEN || BOT_TOKEN === 'YOUR_BOT_TOKEN_HERE') {
+    console.error('❌ لطفا BOT_TOKEN را تنظیم کنید');
+    process.exit(1);
+}
+
+if (!OWNER_ID || OWNER_ID === 123456789) {
+    console.error('❌ لطفا OWNER_ID را تنظیم کنید');
+    process.exit(1);
+}
 
 const bot = new Telegraf(BOT_TOKEN);
 
@@ -164,6 +175,13 @@ bot.on(['message', 'photo', 'sticker', 'document', 'video'], async (ctx) => {
 
 // نمایش لیست گروه‌ها برای انتخاب
 async function showGroupSelection(ctx) {
+  if (groups.size === 0) {
+    await ctx.reply('⚠️ ربات به هیچ گروهی اضافه نشده است.');
+    ctx.session.ownerState = OwnerState.IDLE;
+    await showMainMenu(ctx);
+    return;
+  }
+
   const buttons = [];
   
   // ایجاد دکمه‌ها برای هر گروه
@@ -195,6 +213,11 @@ async function sendToAllGroups(ctx) {
     } catch (error) {
       console.error(`خطا در ارسال به گروه ${groupInfo.title}:`, error);
       failCount++;
+      
+      // حذف گروه از لیست در صورت خطا (ممکن است ربات از گروه اخراج شده باشد)
+      if (error.description && error.description.includes('bot was kicked')) {
+        groups.delete(groupId);
+      }
     }
   }
   
@@ -291,6 +314,8 @@ bot.action('send_to_all_groups', async (ctx) => {
 // راه‌اندازی ربات
 bot.launch().then(() => {
   console.log('🤖 ربات راه‌اندازی شد...');
+}).catch((error) => {
+  console.error('❌ خطا در راه‌اندازی ربات:', error);
 });
 
 // مدیریت خاتمه تمیز
