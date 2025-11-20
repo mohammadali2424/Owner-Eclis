@@ -3,7 +3,7 @@ const { message } = require('telegraf/filters');
 
 // تنظیمات ربات - این مقادیر باید جایگزین شوند
 const BOT_TOKEN = process.env.BOT_TOKEN || 'YOUR_BOT_TOKEN_HERE';
-const OWNER_ID = parseInt(process.env.OWNER_ID) || 123456789; // جایگزین کنید با آی‌دی عددی مالک
+const OWNER_ID = parseInt(process.env.OWNER_ID) || 7495437597; // جایگزین کنید با آی‌دی عددی مالک
 
 // بررسی وجود توکن
 if (!BOT_TOKEN || BOT_TOKEN === 'YOUR_BOT_TOKEN_HERE') {
