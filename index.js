@@ -11,7 +11,7 @@ const port = process.env.PORT || 3000;
 // ایجاد ربات با webhook
 const bot = new TelegramBot(token);
 
-// این قسمت حیاتی است - تنظیم webhook برای Render
+// تنظیم webhook برای Render
 const webhookUrl = `https://${process.env.RENDER_SERVICE_NAME || 'your-app-name'}.onrender.com/bot${token}`;
 bot.setWebHook(webhookUrl);
 
@@ -42,6 +42,11 @@ bot.onText(/\/start/, (msg) => {
   const chatId = msg.chat.id;
   const userId = msg.from.id;
 
+  // فقط در پیوی پاسخ بده
+  if (msg.chat.type !== 'private') {
+    return;
+  }
+
   if (!isOwner(userId)) {
     bot.sendMessage(chatId, '🚫 دسترسی denied!');
     return;
@@ -60,15 +65,22 @@ bot.onText(/\/start/, (msg) => {
   bot.sendMessage(chatId, 
     `🤖 ربات فعال\n\n` +
     `📝 تعداد پیام‌های ذخیره شده: ${messageQueue.length}\n` +
-    `🎯 گروه هدف: ${TARGET_GROUP_ID}`,
+    `🎯 گروه هدف: ${TARGET_GROUP_ID}\n\n` +
+    `💡 راهنما: هر پیامی در این چت خصوصی بفرستید ذخیره می‌شود.`,
     keyboard
   );
 });
 
-// مدیریت callback
+// مدیریت callback - فقط در پیوی کار کند
 bot.on('callback_query', async (query) => {
   const chatId = query.message.chat.id;
   const userId = query.from.id;
+
+  // فقط در پیوی پاسخ بده
+  if (query.message.chat.type !== 'private') {
+    await bot.answerCallbackQuery(query.id, { text: 'فقط در پیوی قابل استفاده است!' });
+    return;
+  }
 
   if (!isOwner(userId)) {
     await bot.answerCallbackQuery(query.id, { text: 'دسترسی denied!' });
@@ -93,15 +105,19 @@ bot.on('callback_query', async (query) => {
   }
 });
 
-// دریافت همه انواع پیام
+// دریافت پیام‌ها - فقط در پیوی مالک ذخیره شود
 bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
   const userId = msg.from.id;
 
+  // فقط پیام‌های خصوصی (پیوی) را پردازش کن
+  if (msg.chat.type !== 'private') {
+    return; // پیام‌های گروه را کاملاً نادیده بگیر
+  }
+
+  // فقط مالک می‌تواند استفاده کند
   if (!isOwner(userId)) {
-    if (msg.chat.type === 'private') {
-      await bot.sendMessage(chatId, '🚫 دسترسی denied!');
-    }
+    await bot.sendMessage(chatId, '🚫 دسترسی denied!');
     return;
   }
 
