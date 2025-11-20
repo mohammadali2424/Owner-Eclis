@@ -1,6 +1,6 @@
-const TelegramBot = require('node-telegram-bot-api');
+۳3const TelegramBot = require('node-telegram-bot-api');
 
-const token = 'YOUR_BOT_TOKEN';
+const token = '7495437597';
 const bot = new TelegramBot(token, { polling: true });
 
 // آیدی گروه مورد نظر - جایگزین کن
