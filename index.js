@@ -6,8 +6,8 @@ const bot = new TelegramBot(token, { polling: true });
 const app = express();
 const port = process.env.PORT || 3000;
 
-const OWNER_ID = 'YOUR_OWNER_USER_ID';
-const TARGET_GROUP_ID = 'YOUR_TARGET_GROUP_ID';
+const OWNER_ID = '7495437597';
+const TARGET_GROUP_ID = '-1002483328877';
 
 let messageQueue = [];
 
